@@ -17,6 +17,8 @@ from ..general import LOGGER, xyn2xy, xywhn2xyxy, xyxy2xywhn
 from ..torch_utils import torch_distributed_zero_first
 from .augmentations import mixup, random_perspective
 
+import torch.nn.functional as F
+
 RANK = int(os.getenv('RANK', -1))
 
 
@@ -37,7 +39,9 @@ def create_dataloader(path,
                       prefix='',
                       shuffle=False,
                       mask_downsample_ratio=1,
-                      overlap_mask=False):
+                      overlap_mask=False,
+                      concatSet=False,
+                      saveMosaicImg=False):
     if rect and shuffle:
         LOGGER.warning('WARNING ⚠️ --rect is incompatible with DataLoader shuffle, setting shuffle=False')
         shuffle = False
@@ -56,7 +60,9 @@ def create_dataloader(path,
             image_weights=image_weights,
             prefix=prefix,
             downsample_ratio=mask_downsample_ratio,
-            overlap=overlap_mask)
+            overlap=overlap_mask,
+            concatSet=concatSet,
+            saveMosaicImg=saveMosaicImg)
 
     batch_size = min(batch_size, len(dataset))
     nd = torch.cuda.device_count()  # number of CUDA devices
@@ -97,11 +103,15 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
         prefix="",
         downsample_ratio=1,
         overlap=False,
+        concatSet=False,
+        saveMosaicImg=False,
     ):
         super().__init__(path, img_size, batch_size, augment, hyp, rect, image_weights, cache_images, single_cls,
                          stride, pad, min_items, prefix)
         self.downsample_ratio = downsample_ratio
         self.overlap = overlap
+        self.concatSet = concatSet
+        self.saveMosaicImg = saveMosaicImg
 
     def __getitem__(self, index):
         index = self.indices[index]  # linear, shuffled, or image_weights
@@ -193,16 +203,119 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
                     masks = torch.flip(masks, dims=[2])
 
             # Cutouts  # labels = cutout(img, labels, p=0.5)
+        # 需要搭配no-overlap使用
+        if self.concatSet:
+            new_masks, new_labels = self.solve_masks_labels(masks, labels, img.shape)
+            nl = len(new_labels)
+        else:
+            new_masks, new_labels = masks, labels
+
+        if self.saveMosaicImg:
+            # 保存增强之后的图像
+            self.save_mosaic_images(img, new_masks, new_labels, index)
 
         labels_out = torch.zeros((nl, 6))
         if nl:
-            labels_out[:, 1:] = torch.from_numpy(labels)
+            labels_out[:, 1:] = torch.from_numpy(new_labels)
 
         # Convert
         img = img.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
         img = np.ascontiguousarray(img)
 
-        return (torch.from_numpy(img), labels_out, self.im_files[index], shapes, masks)
+        return torch.from_numpy(img), labels_out, self.im_files[index], shapes, new_masks
+
+    # 解决标签问题
+    def solve_masks_labels(self, masks, labels, shape):
+        # 将遮盖层和标签进行处理，相接的遮盖层连接在一起并将标签合并
+        masks_float32 = masks.type(torch.float32)
+        try:
+            masks_numpy = F.interpolate(masks_float32[None],
+                                        shape[:2],
+                                        mode='bilinear',
+                                        align_corners=False)[0].cpu().numpy()
+        except RuntimeError:
+            masks_numpy = masks_float32.reshape((-1, shape[0], shape[1]))
+
+        kernel = np.ones((3, 3))
+        for i, m in enumerate(masks_numpy):
+            masks_numpy[i] = cv2.filter2D(m, -1, kernel)
+
+        connectArr = []
+        masks_numpy[masks_numpy > 0] = 1
+        for i in range(len(masks_numpy) - 1):
+            for j in range(i + 1, len(masks_numpy)):
+                if (masks_numpy[i] + masks_numpy[j]).max() == 2:
+                    if len(connectArr) != 0:
+                        for index, arr in enumerate(connectArr):
+                            if len(set(arr + [i, j])) < len(arr) + 2:
+                                connectArr[index] = list(set(arr + [i, j]))
+                            else:
+                                connectArr.append([i, j])
+                    else:
+                        connectArr.append([i, j])
+        new_masks, new_labels = self.concat_masks_labels(masks.cpu().numpy(), labels.copy(), connectArr, shape)
+        new_masks = torch.tensor(new_masks, dtype=torch.uint8)
+
+        return new_masks, new_labels
+
+    # 将掩码和标签合并
+    def concat_masks_labels(self, masks, labels, target, shape):
+        saveIndex = np.zeros(len(masks)) == 0
+        for t in target:
+            # 合并mask并赋值
+            masks[t[0]] = masks[t].sum(axis=0)
+            masks[t[0], masks[t[0]] > 0] = 1
+            # 合并labels并赋值
+            labels_ = xywhn2xyxy(labels[t, 1:], shape[0], shape[1], 0, 0)
+            x_labels = labels_[:, [0, 2]]
+            x_min, x_max = x_labels.min(), x_labels.max()
+            y_labels = labels_[:, [1, 3]]
+            y_min, y_max = y_labels.min(), y_labels.max()
+            labels[t[0], 1:5] = xyxy2xywhn(np.array([x_min, y_min, x_max, y_max]).reshape(1, -1),
+                                           shape[0],
+                                           shape[1],
+                                           clip=True,
+                                           eps=1e-3)
+
+            saveIndex[t[1:]] = False
+        # 去除合并所剩余的mask
+        return masks[saveIndex], labels[saveIndex]
+
+    # 保存mosaic增强后的图像
+    def save_mosaic_images(self, img, masks, labels, index):
+        # 存储mosaic处理的图片
+        workPath = os.getcwd()
+        dirName = 'mosaicImgs'
+        dirPath = os.path.join(workPath, dirName)
+        if not os.path.exists(dirPath):
+            os.mkdir(dirPath)
+
+        fileName = os.path.basename(self.im_files[index])
+        oriName = os.path.splitext(fileName)[0] + '_ori' + os.path.splitext(fileName)[1]
+        path_1 = os.path.join(dirPath, f'{fileName}')
+        path_2 = os.path.join(dirPath, f'{oriName}')
+        ic_1 = img.copy()
+        labels_xyxy = xywhn2xyxy(labels[:, 1:], img.shape[0], img.shape[1], 0, 0)
+        # 绘制目标检测框
+        for l in labels_xyxy:
+            point_1 = (int(l[0]), int(l[1]))
+            point_2 = (int(l[2]), int(l[3]))
+            cv2.rectangle(ic_1, point_1, point_2, (255, 0, 0), 2)
+        # 绘制遮盖层
+        masks_ = masks.type(torch.float32)
+        if not self.overlap:
+            masks_ = masks.sum(axis=0, keepdim=True)
+            masks_ = masks_.type(torch.float32)
+        masks_ = F.interpolate(masks_[None], ic_1.shape[:2], mode='bilinear', align_corners=False)[0]
+        masks_[masks_ > 1] = 1
+        mask_ = masks_.permute((1, 2, 0)) * 255
+        c1 = torch.zeros(mask_.shape, dtype=mask_.dtype)
+        c2 = torch.zeros(mask_.shape, dtype=mask_.dtype)
+        mask = torch.cat((c1, c2, mask_), dim=2).cpu().numpy()
+        mask = mask.astype(np.uint8)
+        output = cv2.addWeighted(ic_1, 1, mask, 0.5, 0)
+        cv2.imwrite(path_1, output)
+        cv2.imwrite(path_2, img)
 
     def load_mosaic(self, index):
         # YOLOv5 4-mosaic loader. Loads 1 image + 3 random images into a 4-image mosaic
