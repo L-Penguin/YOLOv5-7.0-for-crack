@@ -222,7 +222,7 @@ class ConfusionMatrix:
             print(' '.join(map(str, self.matrix[i])))
 
 
-def bbox_iou(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, eps=1e-7):
+def bbox_iou(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, EIoU=False, SIoU=False, eps=1e-7):
     # Returns Intersection over Union (IoU) of box1(1,4) to box2(n,4)
 
     # Get the coordinates of bounding boxes
@@ -232,32 +232,82 @@ def bbox_iou(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, eps=1e-7
         b1_x1, b1_x2, b1_y1, b1_y2 = x1 - w1_, x1 + w1_, y1 - h1_, y1 + h1_
         b2_x1, b2_x2, b2_y1, b2_y2 = x2 - w2_, x2 + w2_, y2 - h2_, y2 + h2_
     else:  # x1, y1, x2, y2 = box1
+        # (x1, y1)左上角坐标 (x2, y2)右下角坐标
         b1_x1, b1_y1, b1_x2, b1_y2 = box1.chunk(4, -1)
         b2_x1, b2_y1, b2_x2, b2_y2 = box2.chunk(4, -1)
         w1, h1 = b1_x2 - b1_x1, b1_y2 - b1_y1 + eps
         w2, h2 = b2_x2 - b2_x1, b2_y2 - b2_y1 + eps
 
     # Intersection area
+    # 两框 交集 面积
     inter = (torch.min(b1_x2, b2_x2) - torch.max(b1_x1, b2_x1)).clamp(0) * \
             (torch.min(b1_y2, b2_y2) - torch.max(b1_y1, b2_y1)).clamp(0)
 
     # Union Area
+    # 两框 并集 面积
     union = w1 * h1 + w2 * h2 - inter + eps
 
     # IoU
     iou = inter / union
-    if CIoU or DIoU or GIoU:
+    # 目标框IOU损失函数的计算
+    if CIoU or DIoU or GIoU or EIoU or SIoU:
+        # 两个框的最小外接矩阵区域的width
         cw = torch.max(b1_x2, b2_x2) - torch.min(b1_x1, b2_x1)  # convex (smallest enclosing box) width
+        # 两个框的最小外界矩阵区域的height
         ch = torch.max(b1_y2, b2_y2) - torch.min(b1_y1, b2_y1)  # convex height
-        if CIoU or DIoU:  # Distance or Complete IoU https://arxiv.org/abs/1911.08287v1
+        if CIoU or DIoU or EIoU:  # Distance or Complete IoU https://arxiv.org/abs/1911.08287v1
+            # 最小外接矩阵的对角线长度平方
             c2 = cw ** 2 + ch ** 2 + eps  # convex diagonal squared
+            # 两框中心点之间距离的平方
             rho2 = ((b2_x1 + b2_x2 - b1_x1 - b1_x2) ** 2 + (b2_y1 + b2_y2 - b1_y1 - b1_y2) ** 2) / 4  # center dist ** 2
+            # CIOU 比 DIOU多了限制长宽比的因素
             if CIoU:  # https://github.com/Zzh-tju/DIoU-SSD-pytorch/blob/master/utils/box/box_utils.py#L47
                 v = (4 / math.pi ** 2) * torch.pow(torch.atan(w2 / h2) - torch.atan(w1 / h1), 2)
                 with torch.no_grad():
                     alpha = v / (v - iou + (1 + eps))
                 return iou - (rho2 / c2 + v * alpha)  # CIoU
+            # EIOU 在 CIOU的基础上将纵横比的损失项拆分成预测的宽高分别与最小外接框宽高的差值，加速收敛提高回归精度
+            elif EIoU:
+                # 真实框和预测框宽度差的平方
+                rho_w2 = ((b2_x2 - b2_x1) - (b1_x2 - b1_x1)) ** 2
+                # 真实框和预测框高度差的平方
+                rho_h2 = ((b2_y2 - b2_y1) - (b1_y2 - b1_y1)) ** 2
+                # 外接矩形宽度的平方
+                cw2 = cw ** 2 + eps
+                # 外接矩形高度的平方
+                ch2 = ch ** 2 + eps
+                return iou - (rho2 / c2 + rho_w2 / cw2 + rho_h2 / ch2)  # EIoU
             return iou - rho2 / c2  # DIoU
+        elif SIoU:
+            # 真实框和预测框中心点的宽度差
+            s_cw = torch.abs((b2_x1 + b2_x2 - b1_x1 - b1_x2) * 0.5)
+            # 真实框和预测框中心点的高度差
+            s_ch = torch.abs((b2_y1 + b2_y2 - b2_y1 - b1_x1) * 0.5)
+            # 真实框和预测框中心点的距离
+            sigma = torch.pow(s_cw ** 2 + s_ch ** 2, 0.5)
+            # 真实框和预测框中心点的夹角β
+            sin_alpha_1 = s_cw / sigma
+            # 真实框和预测框中心点的夹角α(pi/2 - β)
+            sin_alpha_2 = s_ch / sigma
+            # 夹角阈值
+            threshold = pow(2, 0.5) / 2
+            # α大于45°则优化β,否则优化α
+            sin_alpha = torch.where(sin_alpha_1 > threshold, sin_alpha_2, sin_alpha_1)
+            # 角度损失
+            angle_cost = torch.cos(torch.arcsin(sin_alpha) * 2 - math.pi / 2)
+
+            rho_x = (s_cw / cw) ** 2
+            rho_y = (s_ch / ch) ** 2
+            gamma = angle_cost - 2
+            # 距离损失
+            distance_cost = 2 - torch.exp(gamma * rho_x) - torch.exp(gamma * rho_y)
+
+            omiga_w = torch.abs(w1 - w2) / torch.max(w1, w2)
+            omiga_h = torch.abs(h1 - h2) / torch.max(h1, h2)
+            # 形状损失
+            shape_cost = torch.pow(1 - torch.exp(-1 * omiga_w), 4) + torch.pow(1 - torch.exp(-1 * omiga_h), 4)
+            return iou - 0.5 * (distance_cost + shape_cost)
+
         c_area = cw * ch + eps  # convex area
         return iou - (c_area - union) / c_area  # GIoU https://arxiv.org/pdf/1902.09630.pdf
     return iou  # IoU
