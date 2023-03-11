@@ -253,7 +253,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     scheduler.last_epoch = start_epoch - 1  # do not move
     scaler = torch.cuda.amp.GradScaler(enabled=amp)
     stopper, stop = EarlyStopping(patience=opt.patience), False
-    compute_loss = ComputeLoss(model, overlap=overlap)  # init loss class
+    compute_loss = ComputeLoss(model, overlap=overlap, CIoU=opt.CIoU, EIoU=opt.EIoU, SIoU=opt.SIoU)  # init loss class
     # callbacks.run('on_train_start')
     LOGGER.info(f'Image sizes {imgsz} train, {imgsz} val\n'
                 f'Using {train_loader.num_workers * WORLD_SIZE} dataloader workers\n'
@@ -502,6 +502,9 @@ def parse_opt(known=False):
     parser.add_argument('--concat-set', action='store_true', help='Being the concat set')
     parser.add_argument('--save-mosaic', action='store_true', help='Saving the mosaic images')
     parser.add_argument('--kmeanspp', action='store_true', help='Using kmeanspp to get anchors')
+    parser.add_argument('--CIoU', action='store_true', help='Loss type')
+    parser.add_argument('--EIoU', action='store_true', help='Loss type')
+    parser.add_argument('--SIoU', action='store_true', help='Loss type')
 
     # Instance Segmentation Args
     parser.add_argument('--mask-ratio', type=int, default=4, help='Downsample the truth masks to saving memory')
