@@ -194,6 +194,8 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         shuffle=True,
         mask_downsample_ratio=mask_ratio,
         overlap_mask=overlap,
+        concatSet=opt.concat_set,
+        saveMosaicImg=opt.save_mosaic
     )
     labels = np.concatenate(dataset.labels, 0)
     mlc = int(labels[:, 0].max())  # max label class
@@ -218,7 +220,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
 
         if not resume:
             if not opt.noautoanchor:
-                check_anchors(dataset, model=model, thr=hyp['anchor_t'], imgsz=imgsz)  # run AutoAnchor
+                check_anchors(dataset, model=model, thr=hyp['anchor_t'], imgsz=imgsz, kmeanspp=opt.kmeanspp)  # run AutoAnchor
             model.half().float()  # pre-reduce anchor precision
 
             if plots:
@@ -495,6 +497,11 @@ def parse_opt(known=False):
     parser.add_argument('--save-period', type=int, default=-1, help='Save checkpoint every x epochs (disabled if < 1)')
     parser.add_argument('--seed', type=int, default=0, help='Global training seed')
     parser.add_argument('--local_rank', type=int, default=-1, help='Automatic DDP Multi-GPU argument, do not modify')
+
+    # 添加参数
+    parser.add_argument('--concat-set', action='store_true', help='Being the concat set')
+    parser.add_argument('--save-mosaic', action='store_true', help='Saving the mosaic images')
+    parser.add_argument('--kmeanspp', action='store_true', help='Using kmeanspp to get anchors')
 
     # Instance Segmentation Args
     parser.add_argument('--mask-ratio', type=int, default=4, help='Downsample the truth masks to saving memory')
