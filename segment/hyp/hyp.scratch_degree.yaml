@@ -36,15 +36,15 @@ hsv_v: 0.4  # image HSV-Value augmentation (fraction)
 # random_perspective旋转和缩放矩阵参数 (-degrees, +degrees)
 degrees: 180.0  # image rotation (+/- deg)
 # random_perspective中平移矩阵参数
-translate: 0.0  # image translation (+/- fraction)
+translate: 0.1  # image translation (+/- fraction)
 # random_perspective缩放矩阵参数  (1-scale, 1+scale)
-scale: 0.2  # image scale (+/- gain)
+scale: 0.5  # image scale (+/- gain)
 # random_perspective剪切矩阵参数
 shear: 0.0  # image shear (+/- deg)
 # random_perspective透视变化参数
 perspective: 0.0  # image perspective (+/- fraction), range 0-0.001
 # 图像进行上下翻转概率
-flipud: 0.5  # image flip up-down (probability)
+flipud: 0.0  # image flip up-down (probability)
 # 图像进行左右翻转概率
 fliplr: 0.5  # image flip left-right (probability)
 # 图像进行mosaic增强的概率
