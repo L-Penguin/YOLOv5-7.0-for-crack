@@ -316,6 +316,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                     loss *= 4.
 
             # Backward
+            torch.use_deterministic_algorithms(False)
             scaler.scale(loss).backward()
 
             # Optimize - https://pytorch.org/docs/master/notes/amp_examples.html
@@ -505,6 +506,7 @@ def parse_opt(known=False):
     parser.add_argument('--CIoU', action='store_true', help='Loss type')
     parser.add_argument('--EIoU', action='store_true', help='Loss type')
     parser.add_argument('--SIoU', action='store_true', help='Loss type')
+    parser.add_argument('--LBP', action='store_true', help='Using LBP feature')
 
     # Instance Segmentation Args
     parser.add_argument('--mask-ratio', type=int, default=4, help='Downsample the truth masks to saving memory')
