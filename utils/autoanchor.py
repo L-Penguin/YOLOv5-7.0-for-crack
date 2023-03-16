@@ -135,7 +135,7 @@ def kmean_anchors(dataset='./data/coco128.yaml', n=9, img_size=640, thr=4.0, gen
         s = wh.std(0)  # sigmas for whitening
 
         if kmeanspp:
-            k = k_means(wh, 9, use_iou=True, use_pp=True)
+            k = k_means(wh / s, 9, use_iou=True, use_pp=True) * s
         else:
             k = kmeans(wh / s, n, iter=100)[0] * s  # points
 
