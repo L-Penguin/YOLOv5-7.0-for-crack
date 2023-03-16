@@ -21,7 +21,7 @@ if str(ROOT) not in sys.path:
 if platform.system() != 'Windows':
     ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
 
-from models.common import *
+from models.my_common import *
 from models.experimental import *
 from utils.autoanchor import check_anchor_order
 from utils.general import LOGGER, check_version, check_yaml, make_divisible, print_args
@@ -313,28 +313,44 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
             with contextlib.suppress(NameError):
                 args[j] = eval(a) if isinstance(a, str) else a  # eval strings
 
+        # 模块数 * 网络深度比例
         n = n_ = max(round(n * gd), 1) if n > 1 else n  # depth gain
         if m in {
                 Conv, GhostConv, Bottleneck, GhostBottleneck, SPP, SPPF, DWConv, MixConv2d, Focus, CrossConv,
-                BottleneckCSP, C3, C3TR, C3SPP, C3Ghost, nn.ConvTranspose2d, DWConvTranspose2d, C3x}:
+                BottleneckCSP, C3, C3TR, C3SPP, C3Ghost, nn.ConvTranspose2d, DWConvTranspose2d, C3x, SPPFCSPC, ASPP,
+                NewC3, SE, C3SE, C3_SE, CBAM, C3CBAM, C3_CBAM, CA, C3CA, C3_CA, ECA, C3ECA, C3_ECA, DCN, C3DCN,
+                C3DCN_CA, C3DCNCA_CA, NewC3CA, NewC3DCN, NewC3DCNCA, NewC3_CA, NewC3CA_CA, NewC3DCN_CA, NewC3DCNCA_CA,
+                NewC3_1CA, NewC3CA_1CA, NewC3DCN_1CA, NewC3DCNCA_1CA, NewC3_CA_1CA, NewC3CA_CA_1CA, NewC3DCN_CA_1CA,
+                NewC3DCNCA_CA_1CA, C3DCNCA, C3CA_CA
+        }:
+            # c1为输入通道数、c2为输出通道数
             c1, c2 = ch[f], args[0]
-            if c2 != no:  # if not output
+            if c2 != no:  # if not output 检测层之前的模块输出
                 c2 = make_divisible(c2 * gw, 8)
 
+            # 创建模板的参数，添加输入和输出通道数参数
             args = [c1, c2, *args[1:]]
-            if m in {BottleneckCSP, C3, C3TR, C3Ghost, C3x}:
+            if m in {
+                BottleneckCSP, C3, C3TR, C3Ghost, C3x, NewC3, C3SE, C3CBAM, C3CA, C3ECA, C3_SE, C3_CBAM, C3_CA,
+                C3_ECA, C3DCN, C3DCN_CA, C3DCNCA_CA, NewC3CA, NewC3DCN, NewC3DCNCA, NewC3_CA, NewC3CA_CA, NewC3DCN_CA,
+                NewC3DCNCA_CA, NewC3_1CA, NewC3CA_1CA, NewC3DCN_1CA, NewC3DCNCA_1CA, NewC3_CA_1CA, NewC3CA_CA_1CA,
+                NewC3DCN_CA_1CA, NewC3DCNCA_CA_1CA, C3DCNCA, C3CA_CA
+            }:
                 args.insert(2, n)  # number of repeats
                 n = 1
         elif m is nn.BatchNorm2d:
             args = [ch[f]]
         elif m is Concat:
+            # 输出为通道之和
             c2 = sum(ch[x] for x in f)
         # TODO: channel, gw, gd
         elif m in {Detect, Segment}:
+            # 添加输入通道的维度参数
             args.append([ch[x] for x in f])
             if isinstance(args[1], int):  # number of anchors
                 args[1] = [list(range(args[1] * 2))] * len(f)
             if m is Segment:
+                # 保证参数为8的倍数，并乘以yaml配置文件中的gw网络宽度配置
                 args[3] = make_divisible(args[3] * gw, 8)
         elif m is Contract:
             c2 = ch[f] * args[0] ** 2
@@ -346,12 +362,14 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
         m_ = nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m(*args)  # module
         t = str(m)[8:-2].replace('__main__.', '')  # module type
         np = sum(x.numel() for x in m_.parameters())  # number params
+        # 模块的：索引值、上一模块、模块名、模块参数
         m_.i, m_.f, m_.type, m_.np = i, f, t, np  # attach index, 'from' index, type, number params
         LOGGER.info(f'{i:>3}{str(f):>18}{n_:>3}{np:10.0f}  {t:<40}{str(args):<30}')  # print
         save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist
         layers.append(m_)
         if i == 0:
             ch = []
+        # 存储每一层的输出通道数
         ch.append(c2)
     return nn.Sequential(*layers), sorted(save)
 
