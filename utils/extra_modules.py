@@ -175,6 +175,29 @@ def cal_iou(bboxes, p):
 
     return result / len(bboxes)
 
+
+def cal_lbp_feature(img, LBP_POINTS, LBP_RADIUS):
+    h, w = img.shape
+    # 构建 LBP 采样点的位置矩阵
+    sample_points = np.zeros([LBP_POINTS, 2], dtype=np.int_)
+    for i in range(LBP_POINTS):
+        sample_points[i][0] = int(round(LBP_RADIUS * np.cos(i * 2 * np.pi / LBP_POINTS)))
+        sample_points[i][1] = int(round(LBP_RADIUS * np.sin(i * 2 * np.pi / LBP_POINTS)))
+    # 计算 LBP 特征
+    lbp_feature = np.zeros([h - 2 * LBP_RADIUS, w - 2 * LBP_RADIUS], dtype=np.uint8)
+    for i in range(LBP_RADIUS, h - LBP_RADIUS):
+        for j in range(LBP_RADIUS, w - LBP_RADIUS):
+            center_pixel = img[i, j]
+            feature_value = 0
+            for k in range(LBP_POINTS):
+                x = i + sample_points[k][0]
+                y = j + sample_points[k][1]
+                if img[x, y] > center_pixel:
+                    feature_value += 2 ** k
+            lbp_feature[i - LBP_RADIUS, j - LBP_RADIUS] = feature_value
+    return lbp_feature
+
+
 if __name__ == '__main__':
     path = f'./img.png'
     img = cv2.imread(path)

@@ -62,13 +62,15 @@ from utils.torch_utils import (EarlyStopping, ModelEMA, de_parallel, select_devi
 LOCAL_RANK = int(os.getenv('LOCAL_RANK', -1))  # https://pytorch.org/docs/stable/elastic/run.html
 RANK = int(os.getenv('RANK', -1))
 WORLD_SIZE = int(os.getenv('WORLD_SIZE', 1))
+
+
 # GIT_INFO = check_git_info()
 
 
 def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictionary
     save_dir, epochs, batch_size, weights, single_cls, evolve, data, cfg, resume, noval, nosave, workers, freeze, mask_ratio = \
         Path(opt.save_dir), opt.epochs, opt.batch_size, opt.weights, opt.single_cls, opt.evolve, opt.data, opt.cfg, \
-        opt.resume, opt.noval, opt.nosave, opt.workers, opt.freeze, opt.mask_ratio
+            opt.resume, opt.noval, opt.nosave, opt.workers, opt.freeze, opt.mask_ratio
     # callbacks.run('on_pretrain_routine_start')
 
     # Directories
@@ -176,27 +178,26 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         LOGGER.info('Using SyncBatchNorm()')
 
     # Trainloader
-    train_loader, dataset = create_dataloader(
-        train_path,
-        imgsz,
-        batch_size // WORLD_SIZE,
-        gs,
-        single_cls,
-        hyp=hyp,
-        augment=True,
-        cache=None if opt.cache == 'val' else opt.cache,
-        rect=opt.rect,
-        rank=LOCAL_RANK,
-        workers=workers,
-        image_weights=opt.image_weights,
-        quad=opt.quad,
-        prefix=colorstr('train: '),
-        shuffle=True,
-        mask_downsample_ratio=mask_ratio,
-        overlap_mask=overlap,
-        concatSet=opt.concat_set,
-        saveMosaicImg=opt.save_mosaic
-    )
+    train_loader, dataset = create_dataloader(train_path,
+                                              imgsz,
+                                              batch_size // WORLD_SIZE,
+                                              gs,
+                                              single_cls,
+                                              hyp=hyp,
+                                              augment=True,
+                                              cache=None if opt.cache == 'val' else opt.cache,
+                                              rect=opt.rect,
+                                              rank=LOCAL_RANK,
+                                              workers=workers,
+                                              image_weights=opt.image_weights,
+                                              quad=opt.quad,
+                                              prefix=colorstr('train: '),
+                                              shuffle=True,
+                                              mask_downsample_ratio=mask_ratio,
+                                              overlap_mask=overlap,
+                                              concatSet=opt.concat_set,
+                                              saveMosaicImg=opt.save_mosaic,
+                                              LBP=opt.LBP)
     labels = np.concatenate(dataset.labels, 0)
     mlc = int(labels[:, 0].max())  # max label class
     assert mlc < nc, f'Label class {mlc} exceeds nc={nc} in {data}. Possible class labels are 0-{nc - 1}'
@@ -220,7 +221,8 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
 
         if not resume:
             if not opt.noautoanchor:
-                check_anchors(dataset, model=model, thr=hyp['anchor_t'], imgsz=imgsz, kmeanspp=opt.kmeanspp)  # run AutoAnchor
+                check_anchors(dataset, model=model, thr=hyp['anchor_t'], imgsz=imgsz,
+                              kmeanspp=opt.kmeanspp)  # run AutoAnchor
             model.half().float()  # pre-reduce anchor precision
 
             if plots:
