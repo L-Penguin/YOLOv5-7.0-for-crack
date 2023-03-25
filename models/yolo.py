@@ -315,13 +315,14 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
 
         # 模块数 * 网络深度比例
         n = n_ = max(round(n * gd), 1) if n > 1 else n  # depth gain
+
         if m in {
                 Conv, GhostConv, Bottleneck, GhostBottleneck, SPP, SPPF, DWConv, MixConv2d, Focus, CrossConv,
                 BottleneckCSP, C3, C3TR, C3SPP, C3Ghost, nn.ConvTranspose2d, DWConvTranspose2d, C3x, SPPFCSPC, ASPP,
-                NewC3, SE, C3SE, C3_SE, CBAM, C3CBAM, C3_CBAM, CA, C3CA, C3_CA, ECA, C3ECA, C3_ECA, DCN, C3DCN,
+                ASPPF, NewC3, SE, C3SE, C3_SE, CBAM, C3CBAM, C3_CBAM, CA, C3CA, C3_CA, ECA, C3ECA, C3_ECA, DCN, C3DCN,
                 C3DCN_CA, C3DCNCA_CA, NewC3CA, NewC3DCN, NewC3DCNCA, NewC3_CA, NewC3CA_CA, NewC3DCN_CA, NewC3DCNCA_CA,
                 NewC3_1CA, NewC3CA_1CA, NewC3DCN_1CA, NewC3DCNCA_1CA, NewC3_CA_1CA, NewC3CA_CA_1CA, NewC3DCN_CA_1CA,
-                NewC3DCNCA_CA_1CA, C3DCNCA, C3CA_CA
+                NewC3DCNCA_CA_1CA, C3DCNCA, C3CA_CA, DCNv2
         }:
             # c1为输入通道数、c2为输出通道数
             c1, c2 = ch[f], args[0]
@@ -354,6 +355,10 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
                 args[3] = make_divisible(args[3] * gw, 8)
         elif m is Contract:
             c2 = ch[f] * args[0] ** 2
+        elif m is Space2Depth:
+            c2 = 4 * ch[f]
+        elif m is LBP:
+            c2 = ch[f]
         elif m is Expand:
             c2 = ch[f] // args[0] ** 2
         else:
