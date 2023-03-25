@@ -50,7 +50,7 @@ from utils.torch_utils import (ModelEMA, model_info, reshape_classifier_output, 
 LOCAL_RANK = int(os.getenv('LOCAL_RANK', -1))  # https://pytorch.org/docs/stable/elastic/run.html
 RANK = int(os.getenv('RANK', -1))
 WORLD_SIZE = int(os.getenv('WORLD_SIZE', 1))
-GIT_INFO = check_git_info()
+# GIT_INFO = check_git_info()
 
 
 def train(opt, device):
@@ -238,7 +238,7 @@ def train(opt, device):
                     'updates': ema.updates,
                     'optimizer': None,  # optimizer.state_dict(),
                     'opt': vars(opt),
-                    'git': GIT_INFO,  # {remote, branch, commit} if a git repo
+                    # 'git': GIT_INFO,  # {remote, branch, commit} if a git repo
                     'date': datetime.now().isoformat()}
 
                 # Save last, best and delete
@@ -270,8 +270,8 @@ def train(opt, device):
 
 def parse_opt(known=False):
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', type=str, default='yolov5s-cls.pt', help='initial weights path')
-    parser.add_argument('--data', type=str, default='imagenette160', help='cifar10, cifar100, mnist, imagenet, ...')
+    parser.add_argument('--model', type=str, default='./classify/weights/yolov5s-cls.pt', help='initial weights path')
+    parser.add_argument('--data', type=str, default=r'D:\GitHub_repository\YOLOv5-7.0-for-crack\classify\concreteCrackSet-cls', help='cifar10, cifar100, mnist, imagenet, ...')
     parser.add_argument('--epochs', type=int, default=10, help='total training epochs')
     parser.add_argument('--batch-size', type=int, default=64, help='total batch size for all GPUs')
     parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=224, help='train, val image size (pixels)')
