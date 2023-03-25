@@ -895,7 +895,7 @@ class SEBottleneck(nn.Module):
         self.cv1 = Conv(c1, c_, 1, 1)
         self.cv2 = Conv(c_, c2, 3, 1, g=g)
         self.add = shortcut and c1 == c2
-        # self._SE=SE(c1,c2,ratio)
+        # self.se=SE(c1,c2,ratio)
         self.avgpool = nn.AdaptiveAvgPool2d(1)
         self.l1 = nn.Linear(c1, c1 // ratio, bias=False)
         self.relu = nn.ReLU(inplace=True)
@@ -904,7 +904,13 @@ class SEBottleneck(nn.Module):
 
     def forward(self, x):
         x1 = self.cv2(self.cv1(x))
-        y = self._SE(x1)
+        b, c, _, _ = x.size()
+        y = self.avgpool(x1).view(b, c)
+        y = self.l1(y)
+        y = self.relu(y)
+        y = self.l2(y)
+        y = self.sig(y)
+        y = y.view(b, c, 1, 1)
         out = x1 * y.expand_as(x1)
 
         # out=self.se(x1)*x1
@@ -1097,13 +1103,36 @@ class CABottleneck(nn.Module):
         self.cv1 = Conv(c1, c_, 1, 1)
         self.cv2 = Conv(c_, c2, 3, 1, g=g)
         self.add = shortcut and c1 == c2
-        self._CA = CA(c1,c2,ratio)
+        # self.ca=CoordAtt(c1,c2,ratio)
+        self.pool_h = nn.AdaptiveAvgPool2d((None, 1))
+        self.pool_w = nn.AdaptiveAvgPool2d((1, None))
+        mip = max(8, c1 // ratio)
+        self.conv1 = nn.Conv2d(c1, mip, kernel_size=1, stride=1, padding=0)
+        self.bn1 = nn.BatchNorm2d(mip)
+        self.act = hSwish()
+        self.conv_h = nn.Conv2d(mip, c2, kernel_size=1, stride=1, padding=0)
+        self.conv_w = nn.Conv2d(mip, c2, kernel_size=1, stride=1, padding=0)
 
     def forward(self, x):
         x1 = self.cv2(self.cv1(x))
-        y = self._CA(x1)
-        out = x1 * y.expand_as(x1)
+        n, c, h, w = x.size()
+        # c*1*W
+        x_h = self.pool_h(x1)
+        # c*H*1
+        # C*1*h
+        x_w = self.pool_w(x1).permute(0, 1, 3, 2)
+        y = torch.cat([x_h, x_w], dim=2)
+        # C*1*(h+w)
+        y = self.conv1(y)
+        y = self.bn1(y)
+        y = self.act(y)
+        x_h, x_w = torch.split(y, [h, w], dim=2)
+        x_w = x_w.permute(0, 1, 3, 2)
+        a_h = self.conv_h(x_h).sigmoid()
+        a_w = self.conv_w(x_w).sigmoid()
+        out = x1 * a_w * a_h
 
+        # out=self.ca(x1)*x1
         return x + out if self.add else out
 
 
@@ -1167,11 +1196,17 @@ class ECABottleneck(nn.Module):
         self.cv1 = Conv(c1, c_, 1, 1)
         self.cv2 = Conv(c_, c2, 3, 1, g=g)
         self.add = shortcut and c1 == c2
-        self._ECA = ECA(c1, c2)
+        self.eca = ECA(c1, c2)
+        # self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        # self.conv = nn.Conv1d(1, 1, kernel_size=k_size, padding=(k_size - 1) // 2, bias=False)
+        # self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
         x1 = self.cv2(self.cv1(x))
-        y = self._ECA(x1)
+        y = self.eca(x1)
+        # y = self.avg_pool(x1)
+        # y = self.conv(y.squeeze(-1).transpose(-1, -2)).transpose(-1, -2).unsqueeze(-1)
+        # y = self.sigmoid(y)
         out = x1 * y.expand_as(x1)
 
         return x + out if self.add else out
@@ -1224,10 +1259,10 @@ class SPPFCSPC(nn.Module):
 
 
 # Deformable Conv v2模块，可变形卷积
-class DCN(nn.Module):
+class DCNv2(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=1, dilation=1, groups=1, deformable_groups=1):
-        super(DCN, self).__init__()
+        super(DCNv2, self).__init__()
 
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -1297,14 +1332,14 @@ class DCNBottleneck(nn.Module):
         super().__init__()
         c_ = int(c2 * e)  # hidden channels
         self.cv1 = Conv(c1, c_, 1, 1)
-        self.cv2 = DCN(c_, c2, 3, 1, groups=g)
+        self.cv2 = DCNv2(c_, c2, 3, 1, groups=g)
         self.add = shortcut and c1 == c2
 
     def forward(self, x):
         return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
 
 
-class C3DCN(C3):
+class C3DCNv2(C3):
     # C3 module with DCNv2
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):
         super().__init__(c1, c2, n, shortcut, g, e)
@@ -1402,12 +1437,7 @@ class C3_new_DCN2(C3_new):
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):
         super().__init__(c1, c2, n, shortcut, g, e)
         c_ = int(c2 * e)  # hidden channels
-        self.cv3 = DCN((2 + n) * c_, c2, 3, 1)
-
-
-class C3DCN_CA(nn.Module):
-    def __init__(self):
-        super().__init__()
+        self.cv3 = DCNv2((2 + n) * c_, c2, 3, 1)
 
 
 class LBP(nn.Module):
@@ -1429,19 +1459,3 @@ class LBP(nn.Module):
 
             result.to(x.device)
         return result
-
-
-class DCNCABottleneck(nn.Module):
-    def __init__(self, c1, c2, shortcut=True, g=1, e=0.5):
-        super().__init__()
-        c_ = int(c2*e)
-        self.cv1 = Conv(c1, c_, 1, 1)
-        self.cv2 = DCN(c_, c2, 3, 1, group=g)
-        self.add = shortcut and c1 == c2
-
-    def forward(self, x):
-        return
-
-class C3DCNCA(C3):
-    def __init__(self):
-        super().__init__()
