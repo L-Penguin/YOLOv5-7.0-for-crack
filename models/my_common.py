@@ -35,6 +35,7 @@ from utils.torch_utils import copy_attr, smart_inference_mode
 
 import torch.nn.functional as F
 from utils.extra_modules import cal_lbp_feature
+import torchvision
 
 
 def autopad(k, p=None, d=1):  # kernel, padding, dilation
@@ -961,7 +962,8 @@ class CBAM(nn.Module):
 
 class CA(nn.Module):
     def __init__(self, inp, oup, reduction=32):
-        super(CA, self).__init__()
+        self.a = [inp, oup]
+        super().__init__()
         self.pool_h = nn.AdaptiveAvgPool2d((None, 1))
         self.pool_w = nn.AdaptiveAvgPool2d((1, None))
         mip = max(8, inp // reduction)
@@ -1020,10 +1022,10 @@ class ECA(nn.Module):
 
 
 # DCN可变形卷积
-class DCN(nn.Module):
+class DCNv2(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=1, dilation=1, groups=1, deformable_groups=1):
-        super(DCN, self).__init__()
+        super().__init__()
 
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -1164,7 +1166,7 @@ class DCNBottleneck(nn.Module):
         super().__init__()
         c_ = int(c2 * e)  # hidden channels
         self.cv1 = Conv(c1, c_, 1, 1)
-        self.cv2 = DCN(c_, c2, 3, 1, groups=g)
+        self.cv2 = DCN(c_, c2, 3, 1)
         self.add = shortcut and c1 == c2
 
     def forward(self, x):
@@ -1175,9 +1177,9 @@ class DCNBottleneck(nn.Module):
 class DCNCABottleneck(nn.Module):
     def __init__(self, c1, c2, shortcut=True, g=1, e=0.5, ratio=32):  # ch_in, ch_out, shortcut, groups, expansion
         super().__init__()
-        c_ = int(c2 * e)    # hidden channels
+        c_ = int(c2 * e)  # hidden channels
         self.cv1 = Conv(c1, c_, 1, 1)
-        self.cv2 = DCN(c_, c2, 3, 1, groups=g)
+        self.cv2 = DCN(c_, c2, 3, 1)
         self._CA = CA(c2, c2, ratio)
         self.add = shortcut and c1 == c2
 
@@ -1368,6 +1370,7 @@ class NewC3CA(NewC3):
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):
         super().__init__(c1, c2, n, shortcut, g, e)
         c_ = int(c2 * e)
+        # e=0.5
         self.m = nn.Sequential(*(CABottleneck(c_, c_, shortcut, g, e=1.0) for _ in range(n)))
 
 
@@ -1383,6 +1386,7 @@ class NewC3DCN(NewC3):
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):
         super().__init__(c1, c2, n, shortcut, g, e)
         c_ = int(c2 * e)
+        # e=0.5
         self.m = nn.Sequential(*(DCNBottleneck(c_, c_, shortcut, g, e=1.0) for _ in range(n)))
 
 
@@ -1416,6 +1420,7 @@ class NewC3_CA(nn.Module):
         self.cv1 = Conv(c1, c_, 1, 1)
         self.cv2 = Conv(c1, c_, 1, 1)
         self.cv3 = Conv((2 + n) * c_, c2, 1)  # optional act=FReLU(c2)
+        # e=0.5
         self.m = nn.Sequential(*(Bottleneck(c_, c_, shortcut, g, e=1.0) for _ in range(n)))
         self._CA = CA(c2, c2)
 
@@ -1436,14 +1441,15 @@ class NewC3_CA_1CA(nn.Module):
         self.cv2 = Conv(c1, c_, 1, 1)
         self.cv3 = Conv((2 + n) * c_, c2, 1)  # optional act=FReLU(c2)
         self.m = nn.Sequential(*(Bottleneck(c_, c_, shortcut, g, e=1.0) for _ in range(n)))
-        self._CA = CA(c2, c2)
+        self._CA1 = CA(c_, c_)
+        self._CA2 = CA(c2, c2)
 
     def forward(self, x):
-        y1 = self._CA(self.cv2(x))
+        y1 = self._CA1(self.cv2(x))
         y2 = list([y1, self.cv1(x)])
         y2.extend(m(y2[-1]) for m in self.m)
 
-        return self._CA(self.cv3(torch.cat(y2, 1)))
+        return self._CA2(self.cv3(torch.cat(y2, 1)))
 
 
 # NewC3中嵌入添加DCN的Bottleneck，并在输出嵌入CA注意力模块
@@ -1548,3 +1554,126 @@ class SPPFCSPC(nn.Module):
         y1 = self.cv6(self.cv5(torch.cat((x1, x2, x3, self.m(x3)), 1)))
         y2 = self.cv2(x)
         return self.cv7(torch.cat((y1, y2), dim=1))
+
+
+# --------------------------DCNv2 start--------------------------
+class DCN(nn.Module):
+    def __init__(self,
+                 in_channels,
+                 out_channels,
+                 kernel_size=3,
+                 stride=1,
+                 padding=1,
+                 groups=1):
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size
+        self.stride = stride if type(stride) == tuple else (stride, stride)
+        self.padding = padding
+
+        # init weight and bias
+        self.weight = nn.Parameter(torch.Tensor(out_channels, in_channels, kernel_size, kernel_size))
+        self.bias = nn.Parameter(torch.Tensor(out_channels))
+
+        # offset conv
+        self.conv_offset_mask = nn.Conv2d(in_channels,
+                                          3 * kernel_size * kernel_size,
+                                          kernel_size=kernel_size,
+                                          stride=stride,
+                                          padding=self.padding,
+                                          bias=True)
+
+        # init
+        self.reset_parameters()
+        self._init_weight()
+
+    def reset_parameters(self):
+        n = self.in_channels * (self.kernel_size ** 2)
+        stdv = 1. / math.sqrt(n)
+        self.weight.data.uniform_(-stdv, stdv)
+        self.bias.data.zero_()
+
+    def _init_weight(self):
+        # init offset_mask conv
+        nn.init.constant_(self.conv_offset_mask.weight, 0.)
+        nn.init.constant_(self.conv_offset_mask.bias, 0.)
+
+    def forward(self, x):
+        out = self.conv_offset_mask(x)
+        o1, o2, mask = torch.chunk(out, 3, dim=1)
+        offset = torch.cat((o1, o2), dim=1)
+        mask = torch.sigmoid(mask)
+
+        x = torchvision.ops.deform_conv2d(input=x,
+                                          offset=offset,
+                                          weight=self.weight,
+                                          bias=self.bias,
+                                          padding=self.padding,
+                                          mask=mask,
+                                          stride=self.stride)
+        return x
+# ---------------------------DCNv2 end---------------------------
+
+
+class Space2Depth(nn.Module):
+    # Changing the dimension of the Tensor
+    def __init__(self, dimension=1):
+        super().__init__()
+        self.d = dimension
+
+    def forward(self, x):
+        return torch.cat([x[..., ::2, ::2], x[..., 1::2, ::2], x[..., ::2, 1::2], x[..., 1::2, 1::2]], self.d)
+
+
+# ASPP中空洞卷积由串联变并联
+class ASPPF(nn.Module):
+    def __init__(self, c=512, d=256):
+        super().__init__()
+        self.mean = nn.AdaptiveAvgPool2d((1, 1))  # (1,1)means ouput_dim
+        self.cv1 = Conv(c, d, 1, 1)
+        self.cv2 = nn.Conv2d(c, d, 1, 1)
+        self.DilationConv2 = Conv(c, d, 3, 1, p=2, d=2)
+        self.DilationConv4 = Conv(c, d, 3, 1, p=4, d=4)
+        self.DilationConv6 = Conv(c, d, 3, 1, p=6, d=6)
+        # self.DilationConv8 = Conv(c, d, 3, 1, p=8, d=8)
+
+        self.cv3 = Conv(d * 5, d, 1, 1)
+
+    def forward(self, x):
+        size = x.shape[2:]
+
+        x1 = self.cv1(x)
+
+        x2_1 = self.DilationConv2(x)
+        x2_2 = self.DilationConv4(x2_1)
+        x2_3 = self.DilationConv6(x2_2)
+
+        x3 = self.mean(x)
+        x3 = self.cv2(x3)
+        x3 = F.upsample(x3, size=size, mode='bilinear')
+
+        out = self.cv3(torch.cat([x3, x1, x2_1, x2_2, x2_3], dim=1))
+        return out
+
+
+class LBP(nn.Module):
+    def __init__(self, lp=24, lr=5):
+        super().__init__()
+        self.lp = lp
+        self.lr = lr
+
+    def forward(self, x):
+        # x.shape: bs * c * h * w
+        result = np.zeros(x.shape)
+        x_numpy = x.cpu().numpy()
+        for i, img in enumerate(x_numpy):
+            temp = np.zeros(x.shape[1:])
+            for j, im in enumerate(img):
+                temp[j] = cv2.resize(cal_lbp_feature(im, self.lp, self.lr), x.shape[2:])
+
+            result[i] = temp
+
+        x_ = torch.tensor(result, dtype=torch.float32, device=x.device)
+
+        return x_
