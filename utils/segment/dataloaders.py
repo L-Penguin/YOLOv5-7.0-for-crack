@@ -18,7 +18,6 @@ from ..torch_utils import torch_distributed_zero_first
 from .augmentations import mixup, random_perspective
 
 import torch.nn.functional as F
-from ..extra_modules import cal_lbp_feature
 
 RANK = int(os.getenv('RANK', -1))
 
@@ -42,8 +41,7 @@ def create_dataloader(path,
                       mask_downsample_ratio=1,
                       overlap_mask=False,
                       concatSet=False,
-                      saveMosaicImg=False,
-                      LBP=False):
+                      saveMosaicImg=False):
     if rect and shuffle:
         LOGGER.warning('WARNING ⚠️ --rect is incompatible with DataLoader shuffle, setting shuffle=False')
         shuffle = False
@@ -64,8 +62,7 @@ def create_dataloader(path,
             downsample_ratio=mask_downsample_ratio,
             overlap=overlap_mask,
             concatSet=concatSet,
-            saveMosaicImg=saveMosaicImg,
-            lbp=LBP)
+            saveMosaicImg=saveMosaicImg)
 
     batch_size = min(batch_size, len(dataset))
     nd = torch.cuda.device_count()  # number of CUDA devices
@@ -108,7 +105,6 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
         overlap=False,
         concatSet=False,
         saveMosaicImg=False,
-        lbp=False,
     ):
         super().__init__(path, img_size, batch_size, augment, hyp, rect, image_weights, cache_images, single_cls,
                          stride, pad, min_items, prefix)
@@ -116,7 +112,6 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
         self.overlap = overlap
         self.concatSet = concatSet
         self.saveMosaicImg = saveMosaicImg
-        self.lbp = lbp
 
     def __getitem__(self, index):
         index = self.indices[index]  # linear, shuffled, or image_weights
@@ -223,11 +218,6 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
         if nl:
             labels_out[:, 1:] = torch.from_numpy(new_labels)
 
-        if self.lbp:
-            img_lbp = self.LBP(img)
-            print('done')
-            cv2.imwrite('./img_lbp.jpg', img_lbp)
-
         # Convert
         img = img.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
         img = np.ascontiguousarray(img)
@@ -326,18 +316,6 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
         output = cv2.addWeighted(ic_1, 1, mask, 0.5, 0)
         cv2.imwrite(path_1, output)
         cv2.imwrite(path_2, img)
-
-    # 将图像进行LBP算法特征提取
-    def LBP(self, img):
-        out = []
-        for i in range(img.shape[-1]):
-            lbp_feature = cv2.resize(cal_lbp_feature(img[..., i], 24, 7), img.shape[0:2])
-            lbp_feature = lbp_feature[..., None]
-            out.append(lbp_feature)
-
-        out = np.concatenate(out, -1)
-
-        return out
 
     def load_mosaic(self, index):
         # YOLOv5 4-mosaic loader. Loads 1 image + 3 random images into a 4-image mosaic

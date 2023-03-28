@@ -196,8 +196,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                                               mask_downsample_ratio=mask_ratio,
                                               overlap_mask=overlap,
                                               concatSet=opt.concat_set,
-                                              saveMosaicImg=opt.save_mosaic,
-                                              LBP=opt.LBP)
+                                              saveMosaicImg=opt.save_mosaic)
     labels = np.concatenate(dataset.labels, 0)
     mlc = int(labels[:, 0].max())  # max label class
     assert mlc < nc, f'Label class {mlc} exceeds nc={nc} in {data}. Possible class labels are 0-{nc - 1}'
@@ -222,7 +221,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         if not resume:
             if not opt.noautoanchor:
                 check_anchors(dataset, model=model, thr=hyp['anchor_t'], imgsz=imgsz,
-                              kmeanspp=opt.kmeanspp)  # run AutoAnchor
+                              kmeanspp=opt.kmeanspp, cc=opt.iou)  # run AutoAnchor
             model.half().float()  # pre-reduce anchor precision
 
             if plots:
@@ -508,7 +507,7 @@ def parse_opt(known=False):
     parser.add_argument('--CIoU', action='store_true', help='Loss type')
     parser.add_argument('--EIoU', action='store_true', help='Loss type')
     parser.add_argument('--SIoU', action='store_true', help='Loss type')
-    parser.add_argument('--LBP', action='store_true', help='Using LBP feature')
+    parser.add_argument('--iou', action='store_true', help='Clustering criteria')
 
     # Instance Segmentation Args
     parser.add_argument('--mask-ratio', type=int, default=4, help='Downsample the truth masks to saving memory')
