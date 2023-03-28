@@ -192,7 +192,9 @@ class DetectionModel(BaseModel):
             s = 256  # 2x min stride
             m.inplace = self.inplace
             forward = lambda x: self.forward(x)[0] if isinstance(m, Segment) else self.forward(x)
-            m.stride = torch.tensor([s / x.shape[-2] for x in forward(torch.zeros(1, ch, s, s))])  # forward
+            # m.stride = torch.tensor([s / x.shape[-2] for x in forward(torch.zeros(1, ch, s, s))])  # forward
+            # 调整预训练batch-size为2，方便进行池化后归一化
+            m.stride = torch.tensor([s / x.shape[-2] for x in forward(torch.zeros(2, ch, s, s))])  # forward
             check_anchor_order(m)
             m.anchors /= m.stride.view(-1, 1, 1)
             self.stride = m.stride
@@ -322,7 +324,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
                 ASPPF, NewC3, SE, C3SE, C3_SE, CBAM, C3CBAM, C3_CBAM, CA, C3CA, C3_CA, ECA, C3ECA, C3_ECA, DCN, C3DCN,
                 C3DCN_CA, C3DCNCA_CA, NewC3CA, NewC3DCN, NewC3DCNCA, NewC3_CA, NewC3CA_CA, NewC3DCN_CA, NewC3DCNCA_CA,
                 NewC3_1CA, NewC3CA_1CA, NewC3DCN_1CA, NewC3DCNCA_1CA, NewC3_CA_1CA, NewC3CA_CA_1CA, NewC3DCN_CA_1CA,
-                NewC3DCNCA_CA_1CA, C3DCNCA, C3CA_CA, DCNv2
+                NewC3DCNCA_CA_1CA, C3DCNCA, C3CA_CA, DCNv2, NewASPP
         }:
             # c1为输入通道数、c2为输出通道数
             c1, c2 = ch[f], args[0]
