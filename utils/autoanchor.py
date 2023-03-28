@@ -29,7 +29,7 @@ def check_anchor_order(m):
 
 
 @TryExcept(f'{PREFIX}ERROR')
-def check_anchors(dataset, model, thr=4.0, imgsz=640, kmeanspp=False):
+def check_anchors(dataset, model, thr=4.0, imgsz=640, kmeanspp=False, cc=False):
     # Check anchor fit to data, recompute if necessary
     m = model.module.model[-1] if hasattr(model, 'module') else model.model[-1]  # Detect()
     shapes = imgsz * dataset.shapes / dataset.shapes.max(1, keepdims=True)
@@ -53,7 +53,8 @@ def check_anchors(dataset, model, thr=4.0, imgsz=640, kmeanspp=False):
     else:
         LOGGER.info(f'{s}Anchors are a poor fit to dataset ⚠️, attempting to improve...')
         na = m.anchors.numel() // 2  # number of anchors
-        anchors = kmean_anchors(dataset, n=na, img_size=imgsz, thr=thr, gen=1000, verbose=False, kmeanspp=kmeanspp)
+        anchors = kmean_anchors(dataset, n=na, img_size=imgsz, thr=thr, gen=1000, verbose=False, kmeanspp=kmeanspp,
+                                cc=cc)
         new_bpr = metric(anchors)[0]
         if new_bpr > bpr:  # replace anchors
             anchors = torch.tensor(anchors, device=m.anchors.device).type_as(m.anchors)
@@ -66,7 +67,8 @@ def check_anchors(dataset, model, thr=4.0, imgsz=640, kmeanspp=False):
         LOGGER.info(s)
 
 
-def kmean_anchors(dataset='./data/coco128.yaml', n=9, img_size=640, thr=4.0, gen=1000, verbose=True, kmeanspp=False):
+def kmean_anchors(dataset='./data/coco128.yaml', n=9, img_size=640, thr=4.0, gen=1000, verbose=True, kmeanspp=False,
+                  cc=False):
     """ Creates kmeans-evolved anchors from training dataset
 
         Arguments:
@@ -135,9 +137,10 @@ def kmean_anchors(dataset='./data/coco128.yaml', n=9, img_size=640, thr=4.0, gen
         s = wh.std(0)  # sigmas for whitening
 
         if kmeanspp:
-            k = k_means(wh / s, 9, use_iou=True, use_pp=True) * s
+            k = k_means(wh, 9, use_iou=cc, use_pp=True)
         else:
-            k = kmeans(wh / s, n, iter=100)[0] * s  # points
+            k = k_means(wh, 9, use_iou=cc, use_pp=False)
+            # k = kmeans(wh / s, n, iter=100)[0] * s  # points
 
         LOGGER.info(f'Using Kmeans++: {kmeanspp}')
 

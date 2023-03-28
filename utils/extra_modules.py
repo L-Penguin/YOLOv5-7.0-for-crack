@@ -71,6 +71,7 @@ def wh_iou(wh1, wh2):
 
 # k-means聚类，且评价指标采用IOU
 def k_means(boxes, k, dist=np.median, use_iou=True, use_pp=False):
+    print(f'use_iou: {use_iou}; use_pp: {use_pp}')
     """
     yolo k-means methods
     Args:
@@ -88,6 +89,8 @@ def k_means(boxes, k, dist=np.median, use_iou=True, use_pp=False):
     # k_means++计算初始值
     else:
         clusters = calc_center(boxes, k)
+
+    print(f'\ninital clusters: {clusters}\n')
 
     # print(clusters)
     while True:
