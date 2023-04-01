@@ -37,7 +37,7 @@ if __name__ == "__main__":
         iou = re.search(r'.IoU', opt.name).group()
     else:
         iou = 'CIoU'
-    name = f"exp_multiScale{'_' if opt.name else ''}{opt.name}"
+    name = f"exp_multiScale{'_' if opt.name or opt.cfg else ''}{opt.name if opt.name else opt.cfg}"
 
     if name.find('concatSet') != -1:
         concat = "--concat-set "
@@ -82,7 +82,7 @@ if __name__ == "__main__":
               f'--data {data} --hyp {hyp} --epochs 2000 --device {device} ' \
               f'--batch-size {bs} --project train_new --name {name} --multi-scale --cache {cc}--no-overlap --{iou} ' \
               f'{concat}{kmeanspp}> ./train_new/Logs/{name}.log 2>&1 &'
-
+    print(f"{'='*25}\nname: {name}\n{'='*25}")
     a = os.system(command)
     os.system(f"tail -f ./train_new/Logs/{name}.log")
 
