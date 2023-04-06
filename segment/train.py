@@ -196,7 +196,9 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                                               mask_downsample_ratio=mask_ratio,
                                               overlap_mask=overlap,
                                               concatSet=opt.concat_set,
-                                              saveMosaicImg=opt.save_mosaic)
+                                              saveMosaicImg=opt.save_mosaic,
+                                              rotate=opt.rotate,
+                                              mosaic9=opt.mosaic9)
     labels = np.concatenate(dataset.labels, 0)
     mlc = int(labels[:, 0].max())  # max label class
     assert mlc < nc, f'Label class {mlc} exceeds nc={nc} in {data}. Possible class labels are 0-{nc - 1}'
@@ -508,6 +510,8 @@ def parse_opt(known=False):
     parser.add_argument('--EIoU', action='store_true', help='Loss type')
     parser.add_argument('--SIoU', action='store_true', help='Loss type')
     parser.add_argument('--iou', action='store_true', help='Clustering criteria')
+    parser.add_argument('--rotate', action='store_true', help='Rotating sample image')
+    parser.add_argument('--mosaic9', action='store_true', help='Using mosaic9')
 
     # Instance Segmentation Args
     parser.add_argument('--mask-ratio', type=int, default=4, help='Downsample the truth masks to saving memory')
