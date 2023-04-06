@@ -19,11 +19,17 @@ def makexml(txtPath, xmlPath, picPath):  # 读取txt路径，xml保存路径，�
         xmlBuilder = Document()
         annotation = xmlBuilder.createElement("annotation")  # 创建annotation标签
         xmlBuilder.appendChild(annotation)
-        txtFile = open(txtPath + name)
+        txtFile = open(os.path.join(txtPath, name))
         txtList = txtFile.readlines()
-        if name[0:-4] != 'scrip':
-            print(picPath + name[0:-4] + ".jpg")
-            img = cv2.imread(picPath + name[0:-4] + ".jpg")
+
+        imgPath = os.path.join(picPath, name[0:-4] + ".jpg")
+        print('solve: ', imgPath)
+        if os.path.exists(imgPath):
+            img = cv2.imread(imgPath)
+        else:
+            print(f'\n{"="*25}\nerror not exist: {imgPath}\n{"="*25}\n')
+            continue
+
         Pheight, Pwidth, Pdepth = img.shape
         flag = 0
         for i in txtList:
@@ -97,9 +103,16 @@ def makexml(txtPath, xmlPath, picPath):  # 读取txt路径，xml保存路径，�
 
             annotation.appendChild(object)
 
-        f = open(xmlPath + name[0:-4] + ".xml", 'w')
+        if not os.path.exists(xmlPath):
+            os.mkdir(xmlPath)
+
+        f = open(os.path.join(xmlPath, name[0:-4]) + ".xml", 'w')
         xmlBuilder.writexml(f, indent='\t', newl='\n', addindent='\t', encoding='utf-8')
         f.close()
 
 
-makexml("./concreteCrackSet/labels/", "./concreteCrackSet/temp_xmls/", "./concreteCrackSet/images/")
+if __name__ == "__main__":
+    labels = r'D:\Data\YOLO\dataSets\labels'
+    xmls = r'D:\Data\YOLO\dataSets\xmls'
+    imgs = r'D:\Data\YOLO\dataSets\JPEGImages'
+    makexml(labels, xmls, imgs)
