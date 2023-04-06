@@ -21,6 +21,7 @@ parser.add_argument('--bs', default=16, type=int, help='')
 parser.add_argument('--name', default='', type=str, help='')
 parser.add_argument('--iou', action='store_true', help='')
 parser.add_argument('--rm', action='store_true', help='')
+parser.add_argument('--save-mosaic', action='store_true', help='')
 
 opt = parser.parse_args()
 
@@ -39,6 +40,8 @@ if __name__ == "__main__":
         iou = 'CIoU'
     name = f"exp_multiScale{'_' if opt.name or opt.cfg else ''}{opt.name if opt.name else opt.cfg}"
 
+    save = f'--save-mosaic' if opt.save_mosaic else ''
+
     if name.find('concatSet') != -1:
         concat = "--concat-set "
     else:
@@ -48,6 +51,16 @@ if __name__ == "__main__":
         kmeanspp = "--kmeanspp "
     else:
         kmeanspp = ""
+
+    if name.find('mosaic9') != -1:
+        mosaic9 = "--mosaic9 "
+    else:
+        mosaic9 = ""
+
+    if name.find("rotate") != -1:
+        rotate = "--rotate "
+    else:
+        rotate = ""
 
     # 检测文件存在
     for f in [weights, cfg, data, hyp]:
@@ -81,8 +94,14 @@ if __name__ == "__main__":
     command = f'nohup python -u train.py --weights ../weights/yolov5s-seg.pt --cfg {cfg} ' \
               f'--data {data} --hyp {hyp} --epochs 2000 --device {device} ' \
               f'--batch-size {bs} --project train_new --name {name} --multi-scale --cache {cc}--no-overlap --{iou} ' \
-              f'{concat}{kmeanspp}> ./train_new/Logs/{name}.log 2>&1 &'
+              f'{concat}{kmeanspp}{rotate}{mosaic9}{save}> ./train_new/Logs/{name}.log 2>&1 &'
     print(f"{'='*25}\nname: {name}\n{'='*25}")
+    print(f'device: {device};\tbatch-size: {bs}')
+    if kmeanspp or cc:
+        print(f'Clustering: {"kmeans++" if kmeanspp else "kmeans"};\ttype: {"iou" if cc else "norm"}')
+    print(f'Using {"mosaic" + ("9" if mosaic9 else "4")} concat-set: {bool(concat)};\trotate: {bool(rotate)};\t'
+          f'save-mosaic: {bool(save)}')
+    print(f'Loss function: {iou}')
     a = os.system(command)
     os.system(f"tail -f ./train_new/Logs/{name}.log")
 
