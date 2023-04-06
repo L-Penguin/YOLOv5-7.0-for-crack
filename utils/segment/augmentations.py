@@ -30,7 +30,9 @@ def random_perspective(im,
                        scale=.1,
                        shear=10,
                        perspective=0.0,
-                       border=(0, 0)):
+                       border=(0, 0),
+                       enlarge=False,
+                       ):
     # torchvision.transforms.RandomAffine(degrees=(-10, 10), translate=(.1, .1), scale=(.9, 1.1), shear=(-10, 10))
     # targets = [cls, xyxy]
 
@@ -50,8 +52,17 @@ def random_perspective(im,
     # Rotation and Scale
     R = np.eye(3)
     a = random.uniform(-degrees, degrees)
+    if a > 90:
+        a = 180
+    elif a < -90:
+        a = -180
+    elif a < 0:
+        a = -90
+    elif a > 0:
+        a = 90
     # a += random.choice([-180, -90, 0, 90])  # add 90deg rotations to small rotations
-    s = random.uniform(1 - scale, 1 + scale)
+    temp = 1 if enlarge else 1-scale
+    s = random.uniform(temp, 1 + scale)
     # s = 2 ** random.uniform(-scale, scale)
     R[:2] = cv2.getRotationMatrix2D(angle=a, center=(0, 0), scale=s)
 
