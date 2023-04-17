@@ -40,7 +40,7 @@ def create_dataloader(path,
                       shuffle=False,
                       mask_downsample_ratio=1,
                       overlap_mask=False,
-                      concatSet=False,
+                      pre_process=False,
                       saveMosaicImg=False,
                       rotate=False,
                       mosaic9=False):
@@ -63,7 +63,7 @@ def create_dataloader(path,
             prefix=prefix,
             downsample_ratio=mask_downsample_ratio,
             overlap=overlap_mask,
-            concatSet=concatSet,
+            pre_process=pre_process,
             saveMosaicImg=saveMosaicImg,
             rotate=rotate,
             mosaic9=mosaic9)
@@ -107,7 +107,7 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
             prefix="",
             downsample_ratio=1,
             overlap=False,
-            concatSet=False,
+            pre_process=False,
             saveMosaicImg=False,
             rotate=False,
             mosaic9=False,
@@ -116,7 +116,7 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
                          stride, pad, min_items, prefix)
         self.downsample_ratio = downsample_ratio
         self.overlap = overlap
-        self.concatSet = concatSet
+        self.pre_process = pre_process
         self.saveMosaicImg = saveMosaicImg
         self.rotate = rotate
         self.mosaic9 = mosaic9
@@ -215,7 +215,7 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
 
             # Cutouts  # labels = cutout(img, labels, p=0.5)
         # 需要搭配no-overlap使用
-        if self.concatSet:
+        if self.pre_process:
             new_masks, new_labels = self.solve_masks_labels(masks, labels, img.shape)
             nl = len(new_labels)
         else:
@@ -296,11 +296,11 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
     def save_mosaic_images(self, img, masks, labels, index):
         # 存储mosaic处理的图片
         workPath = os.getcwd()
-        dirName = f"mosaicImgs{'9' if self.mosaic9 else '4'}{'_rotate' if self.rotate else ''}" \
+        dirName = f"save-mosaic/mosaicImgs{'9' if self.mosaic9 else '4'}{'_rotate' if self.rotate else ''}" \
                   f"{'-concatSet' if self.concatSet else ''}"
         dirPath = os.path.join(workPath, dirName)
         if not os.path.exists(dirPath):
-            os.mkdir(dirPath)
+            os.makedirs(dirPath)
 
         fileName = os.path.basename(self.im_files[index])
         oriName = os.path.splitext(fileName)[0] + '_ori' + os.path.splitext(fileName)[1]

@@ -195,7 +195,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                                               shuffle=True,
                                               mask_downsample_ratio=mask_ratio,
                                               overlap_mask=overlap,
-                                              concatSet=opt.concat_set,
+                                              pre_process=opt.pre_process,
                                               saveMosaicImg=opt.save_mosaic,
                                               rotate=opt.rotate,
                                               mosaic9=opt.mosaic9)
@@ -223,7 +223,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         if not resume:
             if not opt.noautoanchor:
                 check_anchors(dataset, model=model, thr=hyp['anchor_t'], imgsz=imgsz,
-                              kmeanspp=opt.kmeanspp, cc=opt.iou)  # run AutoAnchor
+                              kmeanspp=opt.kmeanspp, cc=opt.iou, cluster=opt.cluster)  # run AutoAnchor
             model.half().float()  # pre-reduce anchor precision
 
             if plots:
@@ -467,10 +467,13 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
 
 def parse_opt(known=False):
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', type=str, default=ROOT / 'yolov5s-seg.pt', help='initial weights path')
-    parser.add_argument('--cfg', type=str, default='', help='model.yaml path')
-    parser.add_argument('--data', type=str, default=ROOT / 'data/coco128-seg.yaml', help='dataset.yaml path')
-    parser.add_argument('--hyp', type=str, default=ROOT / 'data/hyps/hyp.scratch-low.yaml', help='hyperparameters path')
+    # parser.add_argument('--weights', type=str, default=ROOT / 'yolov5s-seg.pt', help='initial weights path')
+    parser.add_argument('--weights', type=str, default='weights/yolov5s-seg.pt', help='initial weights path')
+    parser.add_argument('--cfg', type=str, default='cfgs/yolov5s-seg.yaml', help='model.yaml path')
+    # parser.add_argument('--data', type=str, default=ROOT / 'data/coco128-seg.yaml', help='dataset.yaml path')
+    parser.add_argument('--data', type=str, default='crack-seg.yaml', help='dataset.yaml path')
+    # parser.add_argument('--hyp', type=str, default=ROOT / 'data/hyps/hyp.scratch-low.yaml', help='hyperparameters path')
+    parser.add_argument('--hyp', type=str, default='../hyps/hyp.scratch.yaml', help='hyperparameters path')
     parser.add_argument('--epochs', type=int, default=100, help='total training epochs')
     parser.add_argument('--batch-size', type=int, default=16, help='total batch size for all GPUs, -1 for autobatch')
     parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=640, help='train, val image size (pixels)')
@@ -490,7 +493,8 @@ def parse_opt(known=False):
     parser.add_argument('--optimizer', type=str, choices=['SGD', 'Adam', 'AdamW'], default='SGD', help='optimizer')
     parser.add_argument('--sync-bn', action='store_true', help='use SyncBatchNorm, only available in DDP mode')
     parser.add_argument('--workers', type=int, default=8, help='max dataloader workers (per RANK in DDP mode)')
-    parser.add_argument('--project', default=ROOT / 'runs/train-seg', help='save to project/name')
+    # parser.add_argument('--project', default=ROOT / 'runs/train-seg', help='save to project/name')
+    parser.add_argument('--project', default='train-seg', help='save to project/name')
     parser.add_argument('--name', default='exp', help='save to project/name')
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
     parser.add_argument('--quad', action='store_true', help='quad dataloader')
@@ -503,13 +507,14 @@ def parse_opt(known=False):
     parser.add_argument('--local_rank', type=int, default=-1, help='Automatic DDP Multi-GPU argument, do not modify')
 
     # 添加参数
-    parser.add_argument('--concat-set', action='store_true', help='Being the concat set')
+    parser.add_argument('--pre-process', action='store_true', help='Being the concat set')
     parser.add_argument('--save-mosaic', action='store_true', help='Saving the mosaic images')
     parser.add_argument('--kmeanspp', action='store_true', help='Using kmeanspp to get anchors')
     parser.add_argument('--CIoU', action='store_true', help='Loss type')
     parser.add_argument('--EIoU', action='store_true', help='Loss type')
     parser.add_argument('--SIoU', action='store_true', help='Loss type')
     parser.add_argument('--iou', action='store_true', help='Clustering criteria')
+    parser.add_argument('--cluster', action='store_true', help='Clustering judge')
     parser.add_argument('--rotate', action='store_true', help='Rotating sample image')
     parser.add_argument('--mosaic9', action='store_true', help='Using mosaic9')
 
@@ -659,6 +664,17 @@ def main(opt, callbacks=Callbacks()):
         LOGGER.info(f'Hyperparameter evolution finished {opt.evolve} generations\n'
                     f"Results saved to {colorstr('bold', save_dir)}\n"
                     f'Usage example: $ python train.py --hyp {evolve_yaml}')
+
+
+# TODO log function
+def log_func(opt):
+    multiScale = 'multi-scale: True\n' if opt.multi_scale else ''
+    log = f'weights: {os.path.basename(opt.weights)}\n' \
+          f'cfg: {os.path.basename(opt.cfg)}\n' \
+          f'hyp: {os.path.basename(opt.hyp)}' \
+          f'bs: {opt.batch_size};\tdevice: {opt.device};' \
+          f'{multiScale}' \
+          f''
 
 
 def run(**kwargs):
