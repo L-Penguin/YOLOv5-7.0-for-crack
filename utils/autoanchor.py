@@ -29,14 +29,16 @@ def check_anchor_order(m):
 
 
 @TryExcept(f'{PREFIX}ERROR')
-def check_anchors(dataset, model, thr=4.0, imgsz=640, kmeanspp=False, cc=False):
+def check_anchors(dataset, model, thr=4.0, imgsz=640, kmeanspp=False, cc=False, cluster=False):
     # Check anchor fit to data, recompute if necessary
     m = model.module.model[-1] if hasattr(model, 'module') else model.model[-1]  # Detect()
     shapes = imgsz * dataset.shapes / dataset.shapes.max(1, keepdims=True)
     scale = np.random.uniform(0.9, 1.1, size=(shapes.shape[0], 1))  # augment scale
+    # 将数据集标签随机缩放[0.9, 1.1]
     wh = torch.tensor(np.concatenate([l[:, 3:5] * s for s, l in zip(shapes * scale, dataset.labels)])).float()  # wh
 
     def metric(k):  # compute metric
+        # wh[:, None] (n, 1, 2);    k[None] (1, 9, 2); => (n, 9, 2)
         r = wh[:, None] / k[None]
         x = torch.min(r, 1 / r).min(2)[0]  # ratio metric
         best = x.max(1)[0]  # best_x
@@ -44,11 +46,12 @@ def check_anchors(dataset, model, thr=4.0, imgsz=640, kmeanspp=False, cc=False):
         bpr = (best > 1 / thr).float().mean()  # best possible recall
         return bpr, aat
 
+    # 8, 16, 32
     stride = m.stride.to(m.anchors.device).view(-1, 1, 1)  # model strides
     anchors = m.anchors.clone() * stride  # current anchors
     bpr, aat = metric(anchors.cpu().view(-1, 2))
     s = f'\n{PREFIX}{aat:.2f} anchors/target, {bpr:.3f} Best Possible Recall (BPR). '
-    if bpr > 0.98 and not kmeanspp and not cc:  # threshold to recompute
+    if bpr > 0.98 and not kmeanspp and not cc and not cluster:  # threshold to recompute
         LOGGER.info(f'{s}Current anchors are a good fit to dataset ✅')
     else:
         LOGGER.info(f'{s}Anchors are a poor fit to dataset ⚠️, attempting to improve...')
