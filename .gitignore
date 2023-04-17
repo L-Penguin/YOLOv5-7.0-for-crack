@@ -35,8 +35,23 @@ data/images/*
 !data/images/bus.jpg
 !data/*.sh
 segment/train-seg/*
-segment/mosaicImgs/*
+segment/predict-seg/*
+segment/mosaicImgs*+/*
+hyps
+classify/train-cls
+classify/imgs-predict-cls
+segment/cfgs
+segment/train-seg
+segment/imgs-predict-seg
+segment/save-mosaic*
+obj-detection/cfgs
+obj-detection/train-obj
+obj-detection/imgs-predict-obj
+obj-detection/save-mosaic*
+dataSets
 classify/train-cls/*
+
+log-train
 
 results*.csv
 
@@ -44,7 +59,7 @@ results*.csv
 coco/
 coco128/
 VOC/
-dataSet/
+dataSets/
 
 # MATLAB GitIgnore -----------------------------------------------------------------------------------------------------
 *.m~
