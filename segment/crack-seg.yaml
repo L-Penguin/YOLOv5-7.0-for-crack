@@ -1,0 +1,9 @@
+train: ../dataSets/crackSet-seg/path_txts/train.txt
+val: ../dataSets/crackSet-seg/path_txts/val.txt
+test: ../dataSets/crackSet-seg/path_txts/test.txt
+
+# number of classes
+nc: 1
+
+# class names
+names: ['Crack']
