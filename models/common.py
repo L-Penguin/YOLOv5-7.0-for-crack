@@ -34,7 +34,6 @@ from utils.plots import Annotator, colors, save_one_box
 from utils.torch_utils import copy_attr, smart_inference_mode
 
 import torch.nn.functional as F
-from utils.extra_modules import cal_lbp_feature
 
 
 def autopad(k, p=None, d=1):  # kernel, padding, dilation
@@ -1440,6 +1439,7 @@ class C3_new_DCN2(C3_new):
         self.cv3 = DCNv2((2 + n) * c_, c2, 3, 1)
 
 
+'''
 class LBP(nn.Module):
     def __init__(self, p, r):
         super().__init__()
@@ -1459,3 +1459,4 @@ class LBP(nn.Module):
 
             result.to(x.device)
         return result
+'''
