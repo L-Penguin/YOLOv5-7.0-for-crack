@@ -138,7 +138,7 @@ def set_logging(name=LOGGING_NAME, verbose=True):
 
 
 set_logging(LOGGING_NAME)  # run before defining LOGGER
-LOGGER = logging.getLogger(LOGGING_NAME)  # define globally (used in train.py, val.py, detect.py, etc.)
+LOGGER = logging.getLogger(LOGGING_NAME)  # define globally (used in train.py, val.py, predict.py, etc.)
 if platform.system() == 'Windows':
     for fn in LOGGER.info, LOGGER.warning:
         setattr(LOGGER, fn.__name__, lambda x: fn(emojis(x)))  # emoji safe logging
@@ -563,7 +563,7 @@ def check_dataset(data, autodownload=True):
 
 def check_amp(model):
     # Check PyTorch Automatic Mixed Precision (AMP) functionality. Return True on correct operation
-    from models.common import AutoShape, DetectMultiBackend
+    from models.my_common import AutoShape, DetectMultiBackend
 
     def amp_allclose(model, im):
         # All close FP32 vs AMP results
@@ -580,7 +580,7 @@ def check_amp(model):
     f = ROOT / 'data' / 'images' / 'bus.jpg'  # image to check
     im = f if f.exists() else 'https://ultralytics.com/images/bus.jpg' if check_online() else np.ones((640, 640, 3))
     try:
-        assert amp_allclose(deepcopy(model), im) or amp_allclose(DetectMultiBackend('yolov5n.pt', device), im)
+        assert amp_allclose(deepcopy(model), im) or amp_allclose(DetectMultiBackend('../weights/obj/yolov5n.pt', device), im)
         LOGGER.info(f'{prefix}checks passed ✅')
         return True
     except Exception:
