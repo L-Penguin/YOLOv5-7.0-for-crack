@@ -44,7 +44,6 @@ class ComputeLoss:
         self.CIoU = CIoU
         self.EIoU = EIoU
         self.SIoU = SIoU
-        print(f'Using Loss typs: CIoU: {CIoU}; EIoU: {EIoU}; SIoU: {SIoU}')
 
     def __call__(self, preds, targets, masks):  # predictions, targets, model
         p, proto = preds
