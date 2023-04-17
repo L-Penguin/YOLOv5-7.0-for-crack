@@ -3,7 +3,7 @@
 Run YOLOv5 detection inference on images, videos, directories, globs, YouTube, webcam, streams, etc.
 
 Usage - sources:
-    $ python detect.py --weights yolov5s.pt --source 0                               # webcam
+    $ python predict.py --weights yolov5s.pt --source 0                               # webcam
                                                      img.jpg                         # image
                                                      vid.mp4                         # video
                                                      screen                          # screenshot
@@ -13,7 +13,7 @@ Usage - sources:
                                                      'rtsp://example.com/media.mp4'  # RTSP, RTMP, HTTP stream
 
 Usage - formats:
-    $ python detect.py --weights yolov5s.pt                 # PyTorch
+    $ python predict.py --weights yolov5s.pt                 # PyTorch
                                  yolov5s.torchscript        # TorchScript
                                  yolov5s.onnx               # ONNX Runtime or OpenCV DNN with --dnn
                                  yolov5s_openvino_model     # OpenVINO
@@ -35,7 +35,7 @@ from pathlib import Path
 import torch
 
 FILE = Path(__file__).resolve()
-ROOT = FILE.parents[0]  # YOLOv5 root directory
+ROOT = FILE.parents[1]  # YOLOv5 root directory
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))  # add ROOT to PATH
 ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
@@ -216,9 +216,11 @@ def run(
 
 def parse_opt():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', nargs='+', type=str, default=ROOT / 'yolov5s.pt', help='model path or triton URL')
-    parser.add_argument('--source', type=str, default=ROOT / 'data/images', help='file/dir/URL/glob/screen/0(webcam)')
-    parser.add_argument('--data', type=str, default=ROOT / 'data/coco128.yaml', help='(optional) dataset.yaml path')
+    parser.add_argument('--weights', nargs='+', type=str, default=ROOT / 'yolov5s-obj.pt', help='model path or triton URL')
+    # parser.add_argument('--source', type=str, default=ROOT / 'data/images', help='file/dir/URL/glob/screen/0(webcam)')
+    parser.add_argument('--source', type=str, default='imgs-predict-obj', help='file/dir/URL/glob/screen/0(webcam)')
+    # parser.add_argument('--data', type=str, default=ROOT / 'data/coco128.yaml', help='(optional) dataset.yaml path')
+    parser.add_argument('--data', type=str, default=ROOT / 'crack-obj.yaml', help='(optional) dataset.yaml path')
     parser.add_argument('--imgsz', '--img', '--img-size', nargs='+', type=int, default=[640], help='inference size h,w')
     parser.add_argument('--conf-thres', type=float, default=0.25, help='confidence threshold')
     parser.add_argument('--iou-thres', type=float, default=0.45, help='NMS IoU threshold')
@@ -234,7 +236,8 @@ def parse_opt():
     parser.add_argument('--augment', action='store_true', help='augmented inference')
     parser.add_argument('--visualize', action='store_true', help='visualize features')
     parser.add_argument('--update', action='store_true', help='update all models')
-    parser.add_argument('--project', default=ROOT / 'runs/detect', help='save results to project/name')
+    # parser.add_argument('--project', default=ROOT / 'runs/predict-obj', help='save results to project/name')
+    parser.add_argument('--project', default='predict-obj', help='save results to project/name')
     parser.add_argument('--name', default='exp', help='save results to project/name')
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
     parser.add_argument('--line-thickness', default=3, type=int, help='bounding box thickness (pixels)')

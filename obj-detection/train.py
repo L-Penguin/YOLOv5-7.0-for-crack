@@ -34,7 +34,7 @@ from torch.optim import lr_scheduler
 from tqdm import tqdm
 
 FILE = Path(__file__).resolve()
-ROOT = FILE.parents[0]  # YOLOv5 root directory
+ROOT = FILE.parents[1]  # YOLOv5 root directory
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))  # add ROOT to PATH
 ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
@@ -63,7 +63,7 @@ from utils.torch_utils import (EarlyStopping, ModelEMA, de_parallel, select_devi
 LOCAL_RANK = int(os.getenv('LOCAL_RANK', -1))  # https://pytorch.org/docs/stable/elastic/run.html
 RANK = int(os.getenv('RANK', -1))
 WORLD_SIZE = int(os.getenv('WORLD_SIZE', 1))
-GIT_INFO = check_git_info()
+# GIT_INFO = check_git_info()
 
 
 def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictionary
@@ -198,7 +198,11 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                                               image_weights=opt.image_weights,
                                               quad=opt.quad,
                                               prefix=colorstr('train: '),
-                                              shuffle=True)
+                                              shuffle=True,
+                                              device=opt.device,
+                                              pre_process=opt.pre_process,
+                                              saveMosaicImg=opt.save_mosaic,
+                                              )
     labels = np.concatenate(dataset.labels, 0)
     mlc = int(labels[:, 0].max())  # max label class
     assert mlc < nc, f'Label class {mlc} exceeds nc={nc} in {data}. Possible class labels are 0-{nc - 1}'
@@ -220,7 +224,8 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
 
         if not resume:
             if not opt.noautoanchor:
-                check_anchors(dataset, model=model, thr=hyp['anchor_t'], imgsz=imgsz)  # run AutoAnchor
+                check_anchors(dataset, model=model, thr=hyp['anchor_t'], imgsz=imgsz,
+                              kmeanspp=opt.kmeanspp, cc=opt.iou, cluster=opt.cluster)  # run AutoAnchor
             model.half().float()  # pre-reduce anchor precision
 
         callbacks.run('on_pretrain_routine_end', labels, names)
@@ -377,7 +382,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                     'updates': ema.updates,
                     'optimizer': optimizer.state_dict(),
                     'opt': vars(opt),
-                    'git': GIT_INFO,  # {remote, branch, commit} if a git repo
+                    # 'git': GIT_INFO,  # {remote, branch, commit} if a git repo
                     'date': datetime.now().isoformat()}
 
                 # Save last, best and delete
@@ -432,12 +437,15 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
 
 def parse_opt(known=False):
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', type=str, default=ROOT / 'yolov5s.pt', help='initial weights path')
-    parser.add_argument('--cfg', type=str, default='', help='model.yaml path')
-    parser.add_argument('--data', type=str, default=ROOT / 'data/coco128.yaml', help='dataset.yaml path')
-    parser.add_argument('--hyp', type=str, default=ROOT / 'data/hyps/hyp.scratch-low.yaml', help='hyperparameters path')
+    # parser.add_argument('--weights', type=str, default=ROOT / 'yolov5s.pt', help='initial weights path')
+    parser.add_argument('--weights', type=str, default='./weights/yolov5s-obj.pt', help='initial weights path')
+    parser.add_argument('--cfg', type=str, default='./cfgs/yolov5s-obj.yaml', help='model.yaml path')
+    # parser.add_argument('--data', type=str, default=ROOT / 'crack-obj.yaml', help='dataset.yaml path')
+    parser.add_argument('--data', type=str, default='crack-obj.yaml', help='dataset.yaml path')
+    # parser.add_argument('--hyp', type=str, default=ROOT / 'data/hyps/hyp.scratch-low.yaml', help='hyperparameters path')
+    parser.add_argument('--hyp', type=str, default='../hyps/hyp.scratch.yaml', help='hyperparameters path')
     parser.add_argument('--epochs', type=int, default=100, help='total training epochs')
-    parser.add_argument('--batch-size', type=int, default=16, help='total batch size for all GPUs, -1 for autobatch')
+    parser.add_argument('--batch-size', type=int, default=4, help='total batch size for all GPUs, -1 for autobatch')
     parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=640, help='train, val image size (pixels)')
     parser.add_argument('--rect', action='store_true', help='rectangular training')
     parser.add_argument('--resume', nargs='?', const=True, default=False, help='resume most recent training')
@@ -455,7 +463,8 @@ def parse_opt(known=False):
     parser.add_argument('--optimizer', type=str, choices=['SGD', 'Adam', 'AdamW'], default='SGD', help='optimizer')
     parser.add_argument('--sync-bn', action='store_true', help='use SyncBatchNorm, only available in DDP mode')
     parser.add_argument('--workers', type=int, default=8, help='max dataloader workers (per RANK in DDP mode)')
-    parser.add_argument('--project', default=ROOT / 'runs/train', help='save to project/name')
+    # parser.add_argument('--project', default=ROOT / 'runs/train', help='save to project/name')
+    parser.add_argument('--project', default='train-obj', help='save to project/name')
     parser.add_argument('--name', default='exp', help='save to project/name')
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
     parser.add_argument('--quad', action='store_true', help='quad dataloader')
@@ -466,6 +475,16 @@ def parse_opt(known=False):
     parser.add_argument('--save-period', type=int, default=-1, help='Save checkpoint every x epochs (disabled if < 1)')
     parser.add_argument('--seed', type=int, default=0, help='Global training seed')
     parser.add_argument('--local_rank', type=int, default=-1, help='Automatic DDP Multi-GPU argument, do not modify')
+
+    # 添加参数
+    parser.add_argument('--save-mosaic', action='store_true', help='Saving the mosaic images')
+    parser.add_argument('--pre-process', action='store_true', help='Using image classify solve training set')
+    parser.add_argument('--kmeanspp', action='store_true', help='Using kmeanspp to get anchors')
+    parser.add_argument('--iou', action='store_true', help='Clustering criteria')
+    parser.add_argument('--cluster', action='store_true', help='Clustering judge')
+    parser.add_argument('--CIoU', action='store_true', help='Loss type')
+    parser.add_argument('--EIoU', action='store_true', help='Loss type')
+    parser.add_argument('--SIoU', action='store_true', help='Loss type')
 
     # Logger arguments
     parser.add_argument('--entity', default=None, help='Entity')
@@ -629,5 +648,7 @@ def run(**kwargs):
 
 
 if __name__ == "__main__":
+    if not os.path.exists(f'./save-mosaic'):
+        os.makedirs(f'./save-mosaic')
     opt = parse_opt()
     main(opt)
