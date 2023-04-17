@@ -72,7 +72,8 @@ def train(opt, device):
     logger = GenericLogger(opt=opt, console_logger=LOGGER) if RANK in {-1, 0} else None
 
     # Download Dataset
-    with torch_distributed_zero_first(LOCAL_RANK), WorkingDirectory(ROOT):
+    # with torch_distributed_zero_first(LOCAL_RANK), WorkingDirectory(ROOT):
+    with torch_distributed_zero_first(LOCAL_RANK):
         data_dir = data if data.is_dir() else (DATASETS_DIR / data)
         if not data_dir.is_dir():
             LOGGER.info(f'\nDataset not found ⚠️, missing path {data_dir}, attempting download...')
@@ -106,7 +107,8 @@ def train(opt, device):
                                                       workers=nw)
 
     # Model
-    with torch_distributed_zero_first(LOCAL_RANK), WorkingDirectory(ROOT):
+    # with torch_distributed_zero_first(LOCAL_RANK), WorkingDirectory(ROOT):
+    with torch_distributed_zero_first(LOCAL_RANK):
         if Path(opt.model).is_file() or opt.model.endswith('.pt'):
             model = attempt_load(opt.model, device='cpu', fuse=False)
         elif opt.model in torchvision.models.__dict__:  # TorchVision models i.e. resnet50, efficientnet_b0
@@ -270,16 +272,17 @@ def train(opt, device):
 
 def parse_opt(known=False):
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', type=str, default='./classify/weights/yolov5s-cls.pt', help='initial weights path')
-    parser.add_argument('--data', type=str, default=r'D:\GitHub_repository\YOLOv5-7.0-for-crack\classify\concreteCrackSet-cls', help='cifar10, cifar100, mnist, imagenet, ...')
-    parser.add_argument('--epochs', type=int, default=10, help='total training epochs')
+    parser.add_argument('--model', type=str, default=r'./weights/yolov5s-cls.pt', help='initial weights path')
+    parser.add_argument('--data', type=str, default=r'../dataSets/crackSet-cls', help='cifar10, cifar100, mnist, imagenet, ...')
+    parser.add_argument('--epochs', type=int, default=100, help='total training epochs')
     parser.add_argument('--batch-size', type=int, default=64, help='total batch size for all GPUs')
-    parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=224, help='train, val image size (pixels)')
+    parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=227, help='train, val image size (pixels)')
     parser.add_argument('--nosave', action='store_true', help='only save final checkpoint')
     parser.add_argument('--cache', type=str, nargs='?', const='ram', help='--cache images in "ram" (default) or "disk"')
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--workers', type=int, default=8, help='max dataloader workers (per RANK in DDP mode)')
-    parser.add_argument('--project', default=ROOT / 'runs/train-cls', help='save to project/name')
+    # parser.add_argument('--project', default=ROOT / 'runs/train-cls', help='save to project/name')
+    parser.add_argument('--project', default='train-cls', help='save to project/name')
     parser.add_argument('--name', default='exp', help='save to project/name')
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
     parser.add_argument('--pretrained', nargs='?', const=True, default=True, help='start from i.e. --pretrained False')
