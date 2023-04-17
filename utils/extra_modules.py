@@ -6,12 +6,29 @@
 # @Software: PyCharm
 # @function: 自定义功能模块
 
+
+import os
+import sys
+
+ROOT = os.path.dirname(__file__)
+ROOT = os.path.join(ROOT, "../")
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))  # add ROOT to PATH
+
+ROOT_CLS = os.path.join(ROOT, "./classify")
+
+
+from pathlib import Path
 import cv2
 import torch
 import numpy as np
 from matplotlib import style
 import matplotlib.pyplot as plt
 import random
+from utils.torch_utils import select_device
+from models.temp import DetectMultiBackend
+from utils.augmentations import classify_transforms
+import torch.nn.functional as F
 
 
 def show_img(img):
@@ -201,9 +218,40 @@ def cal_lbp_feature(img, LBP_POINTS, LBP_RADIUS):
     return lbp_feature
 
 
+def mkDir(path):
+    if os.path.isdir(path):
+        os.mkdir(path)
+    else:
+        raise Exception(f'{path} is not a directory')
+
+
+class image_classify:
+    w = os.path.join(ROOT_CLS, "./weights/yolov5s-cls.pt")
+    d = os.path.join(ROOT_CLS, "./crack-cls.yaml")
+
+    def __init__(self, weights=w, data=d, device='cpu', half=False, dnn=False):
+        device = select_device(device)
+        self.weights = weights
+        self.model = DetectMultiBackend(weights, device=device, dnn=dnn, data=data, fp16=half)
+        self.transforms = classify_transforms(256)
+
+    def __call__(self, img):
+        im = self.transforms(img)
+        im = torch.Tensor(im).to(self.model.device)
+        im = im.half() if self.model.fp16 else im.float()  # uint8 to fp16/32
+        if len(im.shape) == 3:
+            im = im[None]  # expand for batch dim
+
+        results = self.model(im)
+        pred = F.softmax(results, dim=1)
+
+        return bool(pred[0].argmax())
+
+
 if __name__ == '__main__':
-    path = f'./img.png'
-    img = cv2.imread(path)
-    img = torch.from_numpy(img)
-    imgs = seg_img(img, c=2)
-    show_img(imgs)
+    weights = os.path.join(ROOT_CLS, "./train-cls/yolov5s-cls/weights/best.pt")
+    img_path = os.path.join(ROOT_CLS, "./imgs-predict-cls/000.jpg")
+    img = cv2.imread(img_path)
+    img_cls = image_classify(weights=weights)
+    p = img_cls(img)
+    print(p)
