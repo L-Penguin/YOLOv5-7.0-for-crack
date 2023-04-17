@@ -1628,7 +1628,7 @@ class Space2Depth(nn.Module):
 
 # ASPP中空洞卷积由串联变并联
 class ASPPF(nn.Module):
-    def __init__(self, c=512, d=256):
+    def __init__(self, c=512, d=512):
         super().__init__()
         self.mean = nn.AdaptiveAvgPool2d((1, 1))  # (1,1)means ouput_dim
         self.cv1 = Conv(c, d, 1, 1)
@@ -1636,7 +1636,6 @@ class ASPPF(nn.Module):
         self.DilationConv2 = Conv(c, d, 3, 1, p=2, d=2)
         self.DilationConv4 = Conv(c, d, 3, 1, p=4, d=4)
         self.DilationConv6 = Conv(c, d, 3, 1, p=6, d=6)
-        # self.DilationConv8 = Conv(c, d, 3, 1, p=8, d=8)
 
         self.cv3 = Conv(d * 5, d, 1, 1)
 
@@ -1651,6 +1650,7 @@ class ASPPF(nn.Module):
 
         x3 = self.mean(x)
         x3 = self.cv2(x3)
+
         x3 = F.upsample(x3, size=size, mode='bilinear')
 
         out = self.cv3(torch.cat([x3, x1, x2_1, x2_2, x2_3], dim=1))
@@ -1677,3 +1677,71 @@ class LBP(nn.Module):
         x_ = torch.tensor(result, dtype=torch.float32, device=x.device)
 
         return x_
+
+
+# 新的ASPP代码，命名为ASPP
+class ASPPPooling(nn.Sequential):   # 池化 -> 1*1 卷积 -> 上采样
+    def __init__(self, c_in, c_out):
+        super().__init__(nn.AdaptiveAvgPool2d(1), Conv(c_in, c_out))
+
+    def forward(self, x):
+        size = x.shape[-2:]
+        for mod in self:
+            x = mod(x)
+        # 上采样
+        return F.interpolate(x, size=size, mode='bilinear', align_corners=False)
+
+    # 整个 ASPP 架构
+
+
+class NewASPP(nn.Module):
+    def __init__(self, c_in, c_out=512, atrous_rates=[6, 12, 18]):
+        super().__init__()
+        # 1 * 1卷积
+        modules = [Conv(c_in, c_out)]
+
+        # 多尺度空洞卷积
+        rates = tuple(atrous_rates)
+        for rate in rates:
+            modules.append(Conv(c_in, c_out, 3, d=rate))
+
+        # 池化
+        modules.append(ASPPPooling(c_in, c_out))
+
+        self.convs = nn.ModuleList(modules)
+
+        # 拼接后的卷积
+        self.project = nn.Sequential(Conv(len(self.convs)*c_in, c_out), nn.Dropout(0.5))
+
+    def forward(self, x):
+        res = []
+        for conv in self.convs:
+            res.append(conv(x))
+
+        res = torch.cat(res, dim=1)
+        return self.project(res)
+
+
+class NewASPPF(nn.Module):
+    def __init__(self, c_in, c_out, num=3):
+        super().__init__()
+        shrink = 0.5
+        self.cv1 = Conv(c_in, c_out)
+        # 降维
+        c_cen = int(shrink * c_in)
+
+        self.dilation_1 = nn.Sequential(Conv(c_in, c_cen, 3, d=3), Conv(c_cen, c_in, 3, d=4))
+        self.dilation_2 = nn.Sequential(Conv(c_in, c_cen, 3, d=3), Conv(c_cen, c_in, 3, d=4))
+        self.dilation_3 = nn.Sequential(Conv(c_in, c_cen, 3, d=3), Conv(c_cen, c_in, 3, d=4))
+
+        self.pool = ASPPPooling(c_in, c_out)
+
+        self.cv2 = nn.Sequential(Conv((num+2) * c_in, c_out), nn.Dropout(0.5))
+
+    def forward(self, x):
+        x1 = self.cv1(x)
+        x2_1 = self.dilation_1(x)
+        x2_2 = self.dilation_2(x2_1)
+        x2_3 = self.dilation_3(x2_2)
+        x3 = self.pool(x)
+        return self.cv2(torch.cat([x1, x2_1, x2_2, x2_3, x3], dim=1))
