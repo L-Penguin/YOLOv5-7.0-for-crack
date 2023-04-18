@@ -88,7 +88,6 @@ def wh_iou(wh1, wh2):
 
 # k-means聚类，且评价指标采用IOU
 def k_means(boxes, k, dist=np.median, use_iou=True, use_pp=False):
-    print(f'use_iou: {use_iou}; use_pp: {use_pp}')
     """
     yolo k-means methods
     Args:
@@ -105,7 +104,7 @@ def k_means(boxes, k, dist=np.median, use_iou=True, use_pp=False):
         clusters = boxes[np.random.choice(box_number, k, replace=False)]
     # k_means++计算初始值
     else:
-        clusters = calc_center(boxes, k)
+        clusters = calc_center(boxes, k, iou=use_iou)
 
     print(f'\ninital clusters: {clusters}\n')
 
@@ -131,10 +130,17 @@ def k_means(boxes, k, dist=np.median, use_iou=True, use_pp=False):
 
 
 # 计算单独一个点和一个中心的距离
-def single_distance(center, point):
-    center_x, center_y = center[0] / 2, center[1] / 2
-    point_x, point_y = point[0] / 2, point[1] / 2
-    return np.sqrt((center_x - point_x) ** 2 + (center_y - point_y) ** 2)
+def single_distance(center, point, iou=False):
+    if iou:
+        min_w = min(center[0], point[0])
+        min_h = min(center[1], point[1])
+        inter_area = min_h * min_w
+        area = center[0] * center[1] + point[0] * point[1] - inter_area
+        return 1 - inter_area / area
+    else:
+        center_x, center_y = center[0] / 2, center[1] / 2
+        point_x, point_y = point[0] / 2, point[1] / 2
+        return np.sqrt((center_x - point_x) ** 2 + (center_y - point_y) ** 2)
 
 
 # 计算中心点和其他点直接的距离
@@ -157,7 +163,7 @@ def calc_distance(boxes, clusters):
 
 
 # k_means++计算中心坐标
-def calc_center(boxes, k):
+def calc_center(boxes, k, iou=False):
     box_number = boxes.shape[0]
     # 随机选取第一个中心点
     first_index = np.random.choice(box_number, size=1)
@@ -171,7 +177,7 @@ def calc_center(boxes, k):
             break
         # 计算当前中心点和其他点的距离
         for j in range(box_number):
-            j_dist = single_distance(boxes[j], clusters[i])
+            j_dist = single_distance(boxes[j], clusters[i], iou=iou)
             if j_dist < dist_note[j]:
                 dist_note[j] = j_dist
         # 转换为概率
