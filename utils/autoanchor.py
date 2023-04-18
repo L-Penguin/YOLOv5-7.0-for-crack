@@ -139,13 +139,10 @@ def kmean_anchors(dataset='./data/coco128.yaml', n=9, img_size=640, thr=4.0, gen
         assert n <= len(wh)  # apply overdetermined constraint
         s = wh.std(0)  # sigmas for whitening
 
-        if kmeanspp:
-            k = k_means(wh, 9, use_iou=cc, use_pp=True)
-        else:
-            k = k_means(wh, 9, use_iou=cc, use_pp=False)
-            # k = kmeans(wh / s, n, iter=100)[0] * s  # points
+        k = k_means(wh, 9, use_iou=cc, use_pp=kmeanspp)
+        # k = kmeans(wh / s, n, iter=100)[0] * s  # points
 
-        LOGGER.info(f'Using Kmeans++: {kmeanspp}')
+        LOGGER.info(f'Using Kmeans++: {kmeanspp}; cluster type: {"iou" if cc else "norm"}')
 
         assert n == len(k)  # kmeans may return fewer points than requested if wh is insufficient or too similar
     except Exception:
@@ -168,6 +165,7 @@ def kmean_anchors(dataset='./data/coco128.yaml', n=9, img_size=640, thr=4.0, gen
 
     # Evolve
     f, sh, mp, s = anchor_fitness(k), k.shape, 0.9, 0.1  # fitness, generations, mutation prob, sigma
+    print(f'cluster anchors fitness: {f}')
     pbar = tqdm(range(gen), bar_format=TQDM_BAR_FORMAT)  # progress bar
     for _ in pbar:
         v = np.ones(sh)
