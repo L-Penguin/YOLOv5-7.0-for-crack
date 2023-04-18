@@ -121,6 +121,7 @@ def create_dataloader(path,
                       device='0',
                       pre_process=False,
                       saveMosaicImg=False,
+                      cls_name='yolov5s-cls'
                       ):
     if rect and shuffle:
         LOGGER.warning('WARNING ⚠️ --rect is incompatible with DataLoader shuffle, setting shuffle=False')
@@ -141,7 +142,8 @@ def create_dataloader(path,
             prefix=prefix,
             device=device,
             pre_process=pre_process,
-            saveMosaicImg=saveMosaicImg, )
+            saveMosaicImg=saveMosaicImg,
+            cls_name=cls_name,)
 
     batch_size = min(batch_size, len(dataset))
     nd = torch.cuda.device_count()  # number of CUDA devices
@@ -458,7 +460,8 @@ class LoadImagesAndLabels(Dataset):
                  prefix='',
                  device='0',
                  pre_process=False,
-                 saveMosaicImg=False, ):
+                 saveMosaicImg=False,
+                 cls_name='yolov5s-cls',):
         self.img_size = img_size
         self.augment = augment
         self.hyp = hyp
@@ -470,11 +473,21 @@ class LoadImagesAndLabels(Dataset):
         self.path = path
         self.albumentations = Albumentations(size=img_size) if augment else None
 
+        self.cls_name = cls_name
         self.pre_process = pre_process
         self.saveMosaicImg = saveMosaicImg
-        if pre_process:
-            # weights = r"../classify/train-cls/yolov5s-cls/weights/best.pt"
-            weights = r'../classify/train-cls/yolov5s-cls/weights/best.pt'
+        # 图像存储根目录
+        self.imgRoot = f'save-mosaic'
+        if self.pre_process:
+            # weights = r"../weights/cls/yolov5s-cls.pt"
+            weights = f'../classify/train-cls/{self.cls_name}/weights/best.pt'
+            if not os.path.exists(weights):
+                raise FileNotFoundError(f'ERROR: {os.path.abspath(weights)} is not found')
+            self.imgRoot += f'_{self.cls_name}'
+
+            if not os.path.exists(self.imgRoot) and self.saveMosaicImg:
+                os.mkdir(self.imgRoot)
+
             self.img_cls = image_classify(weights=weights, device='cpu')
 
         try:
@@ -675,9 +688,7 @@ class LoadImagesAndLabels(Dataset):
         mosaic = self.mosaic and random.random() < hyp['mosaic']
         if mosaic:
             # Load mosaic
-            img, labels, label_process = self.load_mosaic(index)
-            if self.pre_process:
-                labels = labels[label_process]
+            img, labels = self.load_mosaic(index)
             shapes = None
 
             # MixUp augmentation
@@ -736,7 +747,12 @@ class LoadImagesAndLabels(Dataset):
 
         if self.saveMosaicImg:
             # 保存图像
-            self.save_mosaic_images(img, labels, index, label_process)
+            self.save_mosaic_images(img, labels, index)
+
+        if self.pre_process:
+            # 对目标框进行图像分类处理
+            labels = self.solve_obj_cls(img, labels)
+            nl = len(labels)
 
         labels_out = torch.zeros((nl, 6))
         if nl:
@@ -748,19 +764,43 @@ class LoadImagesAndLabels(Dataset):
 
         return torch.from_numpy(img), labels_out, self.im_files[index], shapes
 
-    def save_mosaic_images(self, img, labels, index, label_process):
+    def solve_obj_cls(self, img, labels):
+        if labels.shape[0] == 0:
+            return labels
+        else:
+            label_process = np.array([True for i in range(labels.shape[0])])
+            labels_xyxy = xywhn2xyxy(labels[:, 1:], img.shape[0], img.shape[1], 0, 0)
+            for i, l in enumerate(labels_xyxy):
+                point_1 = (int(l[0]), int(l[1]))
+                point_2 = (int(l[2]), int(l[3]))
+
+                img_obj = self.img_crop(img, point_1, point_2)
+                if self.pre_process:
+                    if not self.img_cls(img_obj):
+                        label_process[i] = False
+            return labels[label_process]
+
+    def save_mosaic_images(self, img, labels, index):
         workPath = os.getcwd()
-        dirName = f"save-mosaic/mosaicImgs"
+
+        dirName = f"{self.imgRoot}/mosaicImgs"
         dirPath = os.path.join(workPath, dirName)
         if not os.path.exists(dirPath):
-            os.makedirs(dirPath)
+            try:
+                os.makedirs(dirPath)
+            except FileExistsError:
+                os.mkdir(dirPath)
 
-        fileName = os.path.basename(self.im_files[index])
-        oriName = os.path.splitext(fileName)[0] + '_ori' + os.path.splitext(fileName)[1]
-        processName = os.path.splitext(fileName)[0] + 'pre' + os.path.splitext(fileName)[1]
-        path_1 = os.path.join(dirPath, f'{fileName}')
-        path_2 = os.path.join(dirPath, f'{oriName}')
-        path_3 = os.path.join(dirPath, f'{processName}')
+        # 图像文件名
+        oriName = os.path.basename(self.im_files[index])
+        mosaicName = os.path.splitext(oriName)[0] + '_0' + os.path.splitext(oriName)[1]
+        preName = os.path.splitext(oriName)[0] + '_1' + os.path.splitext(oriName)[1]
+
+        # 图像路径
+        path_1 = os.path.join(dirPath, f'{oriName}')
+        path_2 = os.path.join(dirPath, f'{mosaicName}')
+        path_3 = os.path.join(dirPath, f'{preName}')
+
         ic_1 = img.copy()
         ic_2 = img.copy()
         try:
@@ -771,25 +811,42 @@ class LoadImagesAndLabels(Dataset):
             cv2.imwrite(path_2, ic_1)
             return
         # 绘制目标检测框
-        for l in labels_xyxy:
+        for i, l in enumerate(labels_xyxy):
             point_1 = (int(l[0]), int(l[1]))
             point_2 = (int(l[2]), int(l[3]))
+
+            img_obj = self.img_crop(img, point_1, point_2)
+            if self.pre_process:
+                if self.img_cls(img_obj):
+                    cv2.rectangle(ic_2, point_1, point_2, (0, 0, 255), 2)
+                else:
+                    name = f'_{i}'.join(os.path.splitext(oriName))
+                    crop_path = os.path.join(self.imgRoot, 'imgs_crop')
+
+                    if not os.path.exists(crop_path):
+                        os.mkdir(crop_path)
+                    # 被识别为背景的目标框进行保存
+                    cv2.imwrite(os.path.join(crop_path, name), img_obj)
+
             cv2.rectangle(ic_1, point_1, point_2, (255, 0, 0), 2)
 
-        # 展示掩码信息的拼接图像
-        cv2.imwrite(path_1, ic_1)
-        # 原始拼接图像
-        cv2.imwrite(path_2, img)
+        # 存储原始图像
+        cv2.imwrite(path_1, img)
 
-        # 绘制预处理图像并保存
+        # 存储带目标框图像
+        cv2.imwrite(path_2, ic_1)
+
         if self.pre_process:
-            for i, l in enumerate(labels_xyxy):
-                if label_process[i]:
-                    point1 = (int(l[0]), int(l[1]))
-                    point2 = (int(l[2]), int(l[3]))
-                    cv2.rectangle(ic_2, point1, point2, (255, 0, 0), 2)
-
+            # 存储预处理带目标框图像
             cv2.imwrite(path_3, ic_2)
+
+    # 截取图像目标框
+    def img_crop(self, img, p1, p2):
+        p1_x, p1_y = p1
+        p2_x, p2_y = p2
+
+        img_crop = img[p1_y:p2_y, p1_x:p2_x]
+        return img_crop
 
     def load_image(self, i):
         # Loads 1 image from dataset index 'i', returns (im, original hw, resized hw)
@@ -817,14 +874,14 @@ class LoadImagesAndLabels(Dataset):
     def load_mosaic(self, index):
         # YOLOv5 4-mosaic loader. Loads 1 image + 3 random images into a 4-image mosaic
         fileName = os.path.basename(self.im_files[index])
-        labels4, segments4, label_process = [], [], []
+        labels4, segments4 = [], []
         s = self.img_size
         yc, xc = (int(random.uniform(-x, 2 * s + x)) for x in self.mosaic_border)  # mosaic center x, y
         indices = [index] + random.choices(self.indices, k=3)  # 3 additional image indices
         random.shuffle(indices)
 
         # 创建文件记录mosaic处理文件
-        logTxt = './save-mosaic/mosaicLog.txt'
+        logTxt = f'./{self.imgRoot}/mosaicLog.txt'
         content = f'{fileName.ljust(15, " ")}: '
 
         for i, index in enumerate(indices):
@@ -856,15 +913,6 @@ class LoadImagesAndLabels(Dataset):
 
             # Labels
             labels, segments = self.labels[index].copy(), self.segments[index].copy()
-            process = True
-
-            # 当开启预处理和不为背景图像时执行
-            if self.pre_process and labels.shape[0] != 0:
-                if not self.img_cls(img[y1b:y2b, x1b:x2b]):
-                    imName = os.path.basename(self.im_files[index])
-                    cv2.imwrite(f'save-mosaic/{os.path.splitext(fileName)[0]}-{imName}', img[y1b:y2b, x1b:x2b])
-                    # labels = np.zeros((0, 5), dtype=np.float32)
-                    process = False
 
             if labels.size:
                 labels[:, 1:] = xywhn2xyxy(labels[:, 1:], w, h, padw, padh)  # normalized xywh to pixel xyxy format
@@ -872,10 +920,10 @@ class LoadImagesAndLabels(Dataset):
 
             labels4.append(labels)
             segments4.extend(segments)
-            label_process.extend([process for i in range(labels.shape[0])])
         content += '\n'
-        with open(logTxt, 'a', encoding='utf8') as f:
-            f.write(content)
+        if self.saveMosaicImg:
+            with open(logTxt, 'a', encoding='utf8') as f:
+                f.write(content)
 
         # Concat/clip labels
         labels4 = np.concatenate(labels4, 0)
@@ -885,18 +933,17 @@ class LoadImagesAndLabels(Dataset):
 
         # Augment
         img4, labels4, segments4 = copy_paste(img4, labels4, segments4, p=self.hyp['copy_paste'])
-        img4, labels4, label_process = random_perspective(img4,
-                                                          labels4,
-                                                          segments4,
-                                                          label_process,
-                                                          degrees=self.hyp['degrees'],
-                                                          translate=self.hyp['translate'],
-                                                          scale=self.hyp['scale'],
-                                                          shear=self.hyp['shear'],
-                                                          perspective=self.hyp['perspective'],
-                                                          border=self.mosaic_border)  # border to remove
+        img4, labels4 = random_perspective(img4,
+                                           labels4,
+                                           segments4,
+                                           degrees=self.hyp['degrees'],
+                                           translate=self.hyp['translate'],
+                                           scale=self.hyp['scale'],
+                                           shear=self.hyp['shear'],
+                                           perspective=self.hyp['perspective'],
+                                           border=self.mosaic_border)  # border to remove
 
-        return img4, labels4, label_process
+        return img4, labels4
 
     def load_mosaic9(self, index):
         # YOLOv5 9-mosaic loader. Loads 1 image + 8 random images into a 9-image mosaic
