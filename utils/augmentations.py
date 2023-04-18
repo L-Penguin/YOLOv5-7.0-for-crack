@@ -144,7 +144,6 @@ def letterbox(im, new_shape=(640, 640), color=(114, 114, 114), auto=True, scaleF
 def random_perspective(im,
                        targets=(),
                        segments=(),
-                       judge=[],
                        degrees=10,
                        translate=.1,
                        scale=.1,
@@ -235,9 +234,7 @@ def random_perspective(im,
         targets = targets[i]
         targets[:, 1:5] = new[i]
 
-        judge = np.array(judge)[i]
-
-    return im, targets, judge
+    return im, targets
 
 
 def copy_paste(im, labels, segments, p=0.5):
