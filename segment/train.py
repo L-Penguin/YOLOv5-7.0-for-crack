@@ -452,6 +452,12 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         # callbacks.run('on_train_end', last, best, epoch, results)
         # on train end callback using genericLogger
         logger.log_metrics(dict(zip(KEYS[4:16], results)), epochs)
+
+        fi = fitness(np.array(results).reshape(1, -1))
+        print(f'Box(mAP50, mAP50-95): {results[2]}, {results[3]}\n'
+              f'Mask(mAP50, mAP50-95): {results[6]}, {results[7]}\n'
+              f'fitness: {fi}\n')
+
         if not opt.evolve:
             logger.log_model(best, epoch)
         if plots:
