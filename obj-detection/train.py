@@ -202,6 +202,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                                               device=opt.device,
                                               pre_process=opt.pre_process,
                                               saveMosaicImg=opt.save_mosaic,
+                                              cls_name=opt.cls_name
                                               )
     labels = np.concatenate(dataset.labels, 0)
     mlc = int(labels[:, 0].max())  # max label class
@@ -431,6 +432,10 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
 
         callbacks.run('on_train_end', last, best, epoch, results)
 
+        fi = fitness(np.array(results).reshape(1, -1))
+        print(f'mAP50, mAP50-95: {results[2]}, {results[3]}\n'
+              f'fitness: {fi}\n')
+
     torch.cuda.empty_cache()
     return results
 
@@ -477,6 +482,7 @@ def parse_opt(known=False):
     parser.add_argument('--local_rank', type=int, default=-1, help='Automatic DDP Multi-GPU argument, do not modify')
 
     # 添加参数
+    parser.add_argument('--cls-name', default='yolov5s-cls', help='img classify name')
     parser.add_argument('--save-mosaic', action='store_true', help='Saving the mosaic images')
     parser.add_argument('--pre-process', action='store_true', help='Using image classify solve training set')
     parser.add_argument('--kmeanspp', action='store_true', help='Using kmeanspp to get anchors')
