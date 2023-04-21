@@ -693,5 +693,7 @@ def run(**kwargs):
 
 
 if __name__ == "__main__":
+    if not os.path.exists(f'./save-mosaic'):
+        os.makedirs(f'./save-mosaic')
     opt = parse_opt()
     main(opt)
