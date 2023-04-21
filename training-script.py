@@ -20,6 +20,7 @@ parser.add_argument('--task', default='seg', type=str, help='')
 parser.add_argument('--weights', default='', type=str, help='')
 parser.add_argument('--cfg', default='', type=str, help='')
 parser.add_argument('--data', default='', type=str, help='')
+parser.add_argument('--hyp', default='', type=str, help='')
 parser.add_argument('--device', default=0, type=int, help='')
 parser.add_argument('--imgsz', default=0, type=int, help='')
 parser.add_argument('--bs', default=0, type=int, help='')
@@ -87,13 +88,18 @@ def get_command(opt):
         if task == 'cls':
             paramsDic["name"] = os.path.splitext(os.path.split(paramsDic["weights"])[1])[0]
 
-    # cfg自定义修改，限制在根目录和yolov5s前缀，同时修改修改name
+    # cfg自定义修改，限制在根目录和yolov5s前缀，同时修改name
     if opt.cfg:
         f = os.path.splitext(paramsDic["cfg"])
         paramsDic["cfg"] = f[0] + f'-{opt.cfg}'+f[1]
         # 修改name
         if task != 'cls':
             paramsDic["name"] = paramsDic["name"] + f'-{opt.cfg}'
+
+    # hyp自定义修改，限制在hyps根目录
+    if opt.hyp:
+        f = os.path.splitext(paramsDic["hyp"])
+        paramsDic["hyp"] = f[0] + f'-{opt.hyp}' + f[1]
 
     # data自定义修改
     if opt.data:
