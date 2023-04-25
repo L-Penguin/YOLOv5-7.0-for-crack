@@ -29,6 +29,7 @@ from utils.torch_utils import select_device
 from models.temp import DetectMultiBackend
 from utils.augmentations import classify_transforms
 import torch.nn.functional as F
+from math import floor, ceil
 
 
 def show_img(img):
@@ -43,26 +44,62 @@ def show_img(img):
     cv2.waitKey(0)
 
 
-def seg_img(img, c=1, stride=32):
-    """将图像分割返回输出
-    Arguments:
-        img: 图像输入，图像输入固定为等宽高的图像
-        c: 图像分块个数
-    Return:
-        返回ndarray格式的数据，shape为(c, c)
+def pic_concat(img_arr, border=False, b=1):
+    """将子图数组合并生成图像
+        Arguments:
+            img_arr: 子图数列
+            border: 是否开启子图拼接边框
+            b: 边框粗细
     """
-    if c == 1:
-        return img
+    if border:
+        varr = [np.hstack([cv2.copyMakeBorder(im, b, b, b, b, borderType=cv2.BORDER_CONSTANT,
+                                              value=(0, 0, 0)) for im in arr]) for arr in img_arr]
     else:
-        result = np.array([[None for _ in range(c)] for i in range(c)])
-        _, _, w, h = img.shape
-        s_w = w // c
-        s_h = h // c
-        for i in range(c):
-            for j in range(c):
-                result[i][j] = img[:, :, i*s_w:(i+1)*s_w, j*s_h:(j+1)*s_h]
+        varr = [np.hstack(arr) for arr in img_arr]
 
-        return result
+    concat_img = np.vstack(varr)
+
+    return concat_img
+
+
+def seg_img(img, s=224):
+    imgArr = []
+
+    h, w, _ = img.shape
+    if h < s or w < s:
+        t_1 = s // h
+        t_2 = s // w
+
+        t = max(t_1, t_2) + 1
+        im = cv2.resize(img, dsize=None, fx=t, fy=t, interpolation=cv2.INTER_LINEAR)
+    else:
+        im = img.copy()
+
+    # 添加的宽和高的边框像素值
+    b_h = s - (img.shape[0] % s)
+    b_w = s - (img.shape[1] % s)
+
+    if b_h == s:
+        b_h = 0
+
+    if b_w == s:
+        b_w = 0
+
+    im = cv2.copyMakeBorder(im, floor(b_h / 2), ceil(b_h / 2), floor(b_w / 2), ceil(b_w / 2),
+                            borderType=cv2.BORDER_CONSTANT, value=(255, 255, 255))
+    h_img, w_img, _ = im.shape
+
+    i_h, i_w = h_img // s, w_img // s
+
+    for i in range(i_h):
+        arr = []
+        for j in range(i_w):
+            img_temp = img[i * s:(i + 1) * s, j * s:(j + 1) * s]
+            arr.append(img_temp)
+
+        imgArr.append(arr)
+
+    return imgArr
 
 
 def judge_seg(prediction, conf_thres=0.25):
