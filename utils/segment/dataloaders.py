@@ -218,12 +218,14 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
         if self.pre_process:
             new_masks, new_labels = self.solve_masks_labels(masks, labels, img.shape)
             nl = len(new_labels)
+            if new_masks.shape[0]:
+                new_masks = torch.squeeze(self.tensor_dilate(torch.unsqueeze(new_masks, 0), 3), 0)
         else:
             new_masks, new_labels = masks, labels
 
         if self.saveMosaicImg:
             # 保存增强之后的图像
-            self.save_mosaic_images(img, new_masks, new_labels, index)
+            self.save_mosaic_imgs(img, masks, labels, index, new_masks, new_labels)
 
         labels_out = torch.zeros((nl, 6))
         if nl:
@@ -292,28 +294,48 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
         # 去除合并所剩余的mask
         return masks[saveIndex], labels[saveIndex]
 
+    def tensor_dilate(self, bin_img, ksize=3):
+        # 首先为原图加入 padding，防止图像尺寸缩小
+        B, C, H, W = bin_img.shape
+        pad = (ksize - 1) // 2
+        bin_img = F.pad(bin_img, [pad, pad, pad, pad], mode='constant', value=0)
+        # 将原图 unfold 成 patch
+        patches = bin_img.unfold(dimension=2, size=ksize, step=1)
+        patches = patches.unfold(dimension=3, size=ksize, step=1)
+        # B x C x H x W x k x k
+        # 取每个 patch 中最小的值，i.e., 0
+        dilate, _ = patches.reshape(B, C, H, W, -1).max(dim=-1)
+        return dilate
+
     # 保存mosaic增强后的图像
-    def save_mosaic_images(self, img, masks, labels, index):
+    def save_mosaic_imgs(self, img, masks, labels, index, new_masks=None, new_labels=None):
         # 存储mosaic处理的图片
         workPath = os.getcwd()
-        dirName = f"save-mosaic/mosaicImgs{'9' if self.mosaic9 else '4'}{'_rotate' if self.rotate else ''}" \
-                  f"{'-concatSet' if self.concatSet else ''}"
+        dirName = f"save-mosaic/mosaicImgs"
         dirPath = os.path.join(workPath, dirName)
         if not os.path.exists(dirPath):
             os.makedirs(dirPath)
 
         fileName = os.path.basename(self.im_files[index])
-        oriName = os.path.splitext(fileName)[0] + '_ori' + os.path.splitext(fileName)[1]
+        oriName = os.path.splitext(fileName)[0] + '_1' + os.path.splitext(fileName)[1]
+        preName = os.path.splitext(fileName)[0] + '_2' + os.path.splitext(fileName)[1]
         path_1 = os.path.join(dirPath, f'{fileName}')
         path_2 = os.path.join(dirPath, f'{oriName}')
+        path_3 = os.path.join(dirPath, f'{preName}')
+
+        # 原始标签图像
         ic_1 = img.copy()
+        # 预处理标签图像
+        ic_2 = img.copy()
+
         try:
             labels_xyxy = xywhn2xyxy(labels[:, 1:], img.shape[0], img.shape[1], 0, 0)
         except IndexError:
             # print(f'\n{"="*25}\n{fileName} is empty!\n{"="*25}\n')
-            cv2.imwrite(path_1, ic_1)
+            cv2.imwrite(path_1, img)
             cv2.imwrite(path_2, ic_1)
             return
+
         # 绘制目标检测框
         for l in labels_xyxy:
             point_1 = (int(l[0]), int(l[1]))
@@ -333,12 +355,41 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
         mask = mask.astype(np.uint8)
         output = cv2.addWeighted(ic_1, 1, mask, 0.5, 0)
         # 展示掩码信息的拼接图像
-        cv2.imwrite(path_1, output)
+        cv2.imwrite(path_2, output)
         # 原始拼接图像
-        cv2.imwrite(path_2, img)
+        cv2.imwrite(path_1, img)
+
+        # 存储与处理后图像
+        if self.pre_process:
+            try:
+                new_labels_xyxy = xywhn2xyxy(new_labels[:, 1:], img.shape[0], img.shape[1], 0, 0)
+            except IndexError:
+                cv2.imwrite(path_3, ic_1)
+
+            for l in new_labels_xyxy:
+                new_point1 = (int(l[0]), int(l[1]))
+                new_point2 = (int(l[2]), int(l[3]))
+                cv2.rectangle(ic_2, new_point1, new_point2, (0, 0, 255), 2)
+
+            # 绘制遮盖层
+            new_masks_ = new_masks.type(torch.float32)
+            if not self.overlap:
+                new_masks_ = masks.sum(axis=0, keepdim=True)
+                new_masks_ = new_masks_.type(torch.float32)
+
+            new_masks_ = F.interpolate(new_masks_[None], ic_2.shape[:2], mode='bilinear', align_corners=False)[0]
+            new_masks_[new_masks_ > 1] = 1
+            new_masks_ = new_masks_.permute((1, 2, 0)) * 255
+            c1 = torch.zeros(new_masks_.shape, dtype=mask_.dtype)
+            c2 = torch.zeros(new_masks_.shape, dtype=mask_.dtype)
+            new_mask = torch.cat((c1, c2, new_masks_), dim=2).cpu().numpy()
+            new_mask = new_mask.astype(np.uint8)
+            new_output = cv2.addWeighted(ic_2, 1, new_mask, 0.5, 0)
+
+            cv2.imwrite(path_3, new_output)
 
     def load_mosaic(self, index):
-        name = os.path.basename(self.im_files[index])
+        fileName = os.path.basename(self.im_files[index])
         # YOLOv5 4-mosaic loader. Loads 1 image + 3 random images into a 4-image mosaic
         labels4, segments4 = [], []
         s = self.img_size
@@ -347,9 +398,18 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
 
         # 3 additional image indices
         indices = [index] + random.choices(self.indices, k=3)  # 3 additional image indices
+
+        # 创建文件记录mosaic处理文件
+        logTxt = f'./save-mosaic/mosaicLog.txt'
+        content = f'{fileName.ljust(15, " ")}: '
+
         for i, index in enumerate(indices):
             # Load image
             img, _, (h, w) = self.load_image(index)
+
+            imgName = os.path.basename(self.im_files[index])
+            # mosaicLog内容
+            content += f'{imgName.center(15, " ")}'
 
             # place img in img4
             if i == 0:  # top left
@@ -396,6 +456,11 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
             segments4.extend(segments)
 
             img4[y1a:y2a, x1a:x2a] = img[y1b:y2b, x1b:x2b]  # img4[ymin:ymax, xmin:xmax]
+
+        content += '\n'
+        if self.saveMosaicImg:
+            with open(logTxt, 'a', encoding='utf8') as f:
+                f.write(content)
 
         # Concat/clip labels
         labels4 = np.concatenate(labels4, 0)
