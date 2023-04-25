@@ -34,6 +34,9 @@ from pathlib import Path
 
 import torch
 import torch.nn.functional as F
+import numpy as np
+
+from utils.extra_modules import pic_concat
 
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[1]  # YOLOv5 root directory
@@ -48,6 +51,8 @@ from utils.general import (LOGGER, Profile, check_file, check_img_size, check_im
                            increment_path, print_args, strip_optimizer)
 from utils.plots import Annotator
 from utils.torch_utils import select_device, smart_inference_mode
+
+import math
 
 
 @smart_inference_mode()
@@ -69,6 +74,7 @@ def run(
         half=False,  # use FP16 half-precision inference
         dnn=False,  # use OpenCV DNN for ONNX inference
         vid_stride=1,  # video frame-rate stride
+        seg_predict=False
 ):
     source = str(source)
     save_img = not nosave and not source.endswith('.txt')  # save inference images
@@ -98,13 +104,21 @@ def run(
     elif screenshot:
         dataset = LoadScreenshots(source, img_size=imgsz, stride=stride, auto=pt)
     else:
-        dataset = LoadImages(source, img_size=imgsz, transforms=classify_transforms(imgsz[0]), vid_stride=vid_stride)
+        dataset = LoadImages(source, img_size=imgsz, transforms=classify_transforms(imgsz[0], seg=seg_predict),
+                             vid_stride=vid_stride)
     vid_path, vid_writer = [None] * bs, [None] * bs
 
     # Run inference
     model.warmup(imgsz=(1 if pt else bs, 3, *imgsz))  # warmup
     seen, windows, dt = 0, [], (Profile(), Profile(), Profile())
     for path, im, im0s, vid_cap, s in dataset:
+        if seg_predict:
+            im, shape, imgArr = im
+            s += f'seg-shape: {shape}'
+            # 红色遮盖层
+            mask = np.zeros(imgArr[0][0].shape, np.uint8)
+            mask[:, :, :] = [0, 0, 255]
+
         with dt[0]:
             im = torch.Tensor(im).to(model.device)
             im = im.half() if model.fp16 else im.float()  # uint8 to fp16/32
@@ -132,6 +146,12 @@ def run(
             save_path = str(save_dir / p.name)  # im.jpg
             txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')  # im.txt
 
+            if seg_predict and i % shape[1] == 0:
+                s += '\n'
+
+            if seg_predict:
+                s += '<'
+
             s += '%gx%g ' % im.shape[2:]  # print string
             annotator = Annotator(im0, example=str(names), pil=True)
 
@@ -139,10 +159,19 @@ def run(
             top5i = prob.argsort(0, descending=True)[:5].tolist()  # top 5 indices
             s += f"{', '.join(f'{names[j]} {prob[j]:.2f}' for j in top5i)}, "
 
+            if seg_predict:
+                s += '>'
+
+            # 绘制seg模式下的遮盖层
+            if seg_predict and top5i[0] == 1:
+                row = math.floor(i / shape[1])
+                col = i % shape[1]
+                imgArr[row][col] = cv2.addWeighted(imgArr[row][col], 1, mask, 0.7, 0)
+
             # Write results
             text = '\n'.join(f'{prob[j]:.2f} {names[j]}' for j in top5i)
             if save_img or view_img:  # Add bbox to image
-                annotator.text((32, 32), text, txt_color=(255, 255, 255))
+                annotator.text((32, 32), text, txt_color=(255, 0, 0))
             if save_txt:  # Write to file
                 with open(f'{txt_path}.txt', 'a') as f:
                     f.write(text + '\n')
@@ -176,6 +205,12 @@ def run(
                         vid_writer[i] = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
                     vid_writer[i].write(im0)
 
+        if seg_predict:
+            result_img = pic_concat(imgArr, True)
+            path_concat = '_concat'.join(os.path.splitext(p.name))
+            path_concat = os.path.join(os.path.dirname(save_path), path_concat)
+            cv2.imwrite(path_concat, result_img)
+
         # Print time (inference-only)
         LOGGER.info(f"{s}{dt[1].dt * 1E3:.1f}ms")
 
@@ -195,7 +230,7 @@ def parse_opt():
     # parser.add_argument('--source', type=str, default=ROOT / 'data/images', help='file/dir/URL/glob/screen/0(webcam)')
     parser.add_argument('--source', type=str, default='imgs-predict-cls', help='file/dir/URL/glob/screen/0(webcam)')
     parser.add_argument('--data', type=str, default='./crack-cls.yaml', help='(optional) dataset.yaml path')
-    parser.add_argument('--imgsz', '--img', '--img-size', nargs='+', type=int, default=[227], help='inference size h,w')
+    parser.add_argument('--imgsz', '--img', '--img-size', nargs='+', type=int, default=[224], help='inference size h,w')
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--view-img', action='store_true', help='show results')
     parser.add_argument('--save-txt', action='store_true', help='save results to *.txt')
@@ -210,6 +245,9 @@ def parse_opt():
     parser.add_argument('--half', action='store_true', help='use FP16 half-precision inference')
     parser.add_argument('--dnn', action='store_true', help='use OpenCV DNN for ONNX inference')
     parser.add_argument('--vid-stride', type=int, default=1, help='video frame-rate stride')
+
+    parser.add_argument('--seg-predict', action='store_true', help='Using seg-imgs predicted')
+
     opt = parser.parse_args()
     opt.imgsz *= 2 if len(opt.imgsz) == 1 else 1  # expand
     print_args(vars(opt))
