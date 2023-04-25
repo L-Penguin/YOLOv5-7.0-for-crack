@@ -1309,13 +1309,15 @@ class ClassificationDataset(torchvision.datasets.ImageFolder):
         album_transform: Albumentations transforms, used if installed
     """
 
-    def __init__(self, root, augment, imgsz, cache=False):
+    def __init__(self, root, augment, imgsz, cache=False, save=False):
         super().__init__(root=root)
         self.torch_transforms = classify_transforms(imgsz)
         self.album_transforms = classify_albumentations(augment, imgsz) if augment else None
         self.cache_ram = cache is True or cache == 'ram'
         self.cache_disk = cache == 'disk'
         self.samples = [list(x) + [Path(x[0]).with_suffix('.npy'), None] for x in self.samples]  # file, index, npy, im
+
+        self.save = save
 
     def __getitem__(self, i):
         f, j, fn, im = self.samples[i]  # filename, index, filename.with_suffix('.npy'), image
@@ -1331,6 +1333,21 @@ class ClassificationDataset(torchvision.datasets.ImageFolder):
             sample = self.album_transforms(image=cv2.cvtColor(im, cv2.COLOR_BGR2RGB))["image"]
         else:
             sample = self.torch_transforms(im)
+
+        if self.save:
+            path = f'./imgs-process'
+            oriName = os.path.basename(f)
+            proName = '_1'.join(os.path.splitext(oriName))
+
+            path_1 = os.path.join(path, oriName)
+            path_2 = os.path.join(path, proName)
+
+            img = sample.cpu().numpy().transpose(1, 2, 0)
+            img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
+            cv2.imwrite(path_1, im)
+            cv2.imwrite(path_2, img)
+
         return sample, j
 
 
@@ -1341,10 +1358,11 @@ def create_classification_dataloader(path,
                                      cache=False,
                                      rank=-1,
                                      workers=8,
-                                     shuffle=True):
+                                     shuffle=True,
+                                     save=False):
     # Returns Dataloader object to be used with YOLOv5 Classifier
     with torch_distributed_zero_first(rank):  # init dataset *.cache only once if DDP
-        dataset = ClassificationDataset(root=path, imgsz=imgsz, augment=augment, cache=cache)
+        dataset = ClassificationDataset(root=path, imgsz=imgsz, augment=augment, cache=cache, save=save)
     batch_size = min(batch_size, len(dataset))
     nd = torch.cuda.device_count()
     nw = min([os.cpu_count() // max(nd, 1), batch_size if batch_size > 1 else 0, workers])
