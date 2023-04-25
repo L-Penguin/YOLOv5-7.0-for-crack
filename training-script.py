@@ -14,6 +14,10 @@ import sys
 import argparse
 from time import strftime, localtime
 
+# 创建记录训练指令文件夹
+ROOT = os.path.abspath(__file__)
+ROOT = os.path.dirname(ROOT)
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--task', default='seg', type=str, help='')
@@ -48,9 +52,9 @@ def get_command(opt):
         "cfg": f"./cfgs/yolov5s-{task}.yaml" if task != 'cls' else '',
         "data": f"./crack-{task}.yaml",
         "hyp": f"../hyps/hyp.scratch.yaml",
-        "epochs": 2000,
+        "epochs": 2000 if task != 'cls' else 100,
         "device": 0,
-        "imgsz": 640,
+        "imgsz": 640 if task != 'cls' else 224,
         "batch-size": 12,
         "project": f"train-{task}",
         "name": "exp_multiScale" if task != 'cls' else '',
@@ -59,6 +63,7 @@ def get_command(opt):
     # cls时的name
     if task == 'cls':
         paramsDic["name"] = os.path.splitext(os.path.split(paramsDic["weights"])[1])[0]
+        paramsDic["data"] = "../dataSets/crackSet-cls"
 
     # 默认布尔参数
     boolsDic = {
@@ -157,7 +162,10 @@ def get_command(opt):
     logPath = './logs'
     logName = paramsDic["name"] + '.log'
     if not os.path.exists(logPath):
-        os.makedirs(logPath)
+        try:
+            os.mkdir(logPath)
+        except:
+            os.makedirs(logPath)
         print(f'logPath: {os.path.abspath(logPath)} is not existed; Now Creating!')
     log = os.path.join(logPath, logName)
 
@@ -235,11 +243,12 @@ def get_command(opt):
     print(f'command: {command}')
     print(f'train: {train}\nlog: {log}')
 
-    # 创建记录训练指令文件夹
-    ROOT = os.path.dirname(__file__)
     log_train = os.path.join(ROOT, './log-train')
     if not os.path.exists(log_train):
-        os.makedirs(log_train)
+        try:
+            os.mkdir(log_train)
+        except:
+            os.makedirs(log_train)
 
     # 记录各种任务的log记录
     file = os.path.join(log_train, f'train-{task}.txt')
@@ -278,6 +287,7 @@ def get_command(opt):
                   f'log路径: {os.path.abspath(log)}\n' \
                   f'{sep}\n'
         txt.write(content)
+        print(f'training detail saved: {file}')
 
     return command, tail_c
 
@@ -286,3 +296,4 @@ if __name__ == "__main__":
     command, tail_c = get_command(opt)
     os.system(command)
     os.system(tail_c)
+    print(ROOT)
