@@ -123,14 +123,14 @@ def run(
     top1, top5 = acc.mean(0).tolist()
 
     if pbar:
-        pbar.desc = f"{pbar.desc[:-36]}{loss:>12.3g}{top1:>12.3g}{top5:>12.3g}"
+        pbar.desc = f"{pbar.desc[:-36]}{loss:>12.3g}{top1:>12.4g}{top5:>12.3g}"
     if verbose:  # all classes
         LOGGER.info(f"{'Class':>24}{'Images':>12}{'top1_acc':>12}{'top5_acc':>12}")
-        LOGGER.info(f"{'all':>24}{targets.shape[0]:>12}{top1:>12.3g}{top5:>12.3g}")
+        LOGGER.info(f"{'all':>24}{targets.shape[0]:>12}{top1:>12.4g}{top5:>12.3g}")
         for i, c in model.names.items():
             aci = acc[targets == i]
             top1i, top5i = aci.mean(0).tolist()
-            LOGGER.info(f"{c:>24}{aci.shape[0]:>12}{top1i:>12.3g}{top5i:>12.3g}")
+            LOGGER.info(f"{c:>24}{aci.shape[0]:>12}{top1i:>12.4g}{top5i:>12.3g}")
 
         # Print results
         t = tuple(x.t / len(dataloader.dataset.samples) * 1E3 for x in dt)  # speeds per image
@@ -148,7 +148,7 @@ def parse_opt():
     parser.add_argument('--weights', nargs='+', type=str, default=ROOT / 'yolov5s-cls.pt', help='model.pt path(s)')
     parser.add_argument('--batch-size', type=int, default=128, help='batch size')
     # parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=224, help='inference size (pixels)')
-    parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=227, help='inference size (pixels)')
+    parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=224, help='inference size (pixels)')
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--workers', type=int, default=8, help='max dataloader workers (per RANK in DDP mode)')
     parser.add_argument('--verbose', nargs='?', const=True, default=True, help='verbose output')
