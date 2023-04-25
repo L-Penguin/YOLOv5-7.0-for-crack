@@ -46,6 +46,7 @@ segment/imgs-predict-seg
 segment/save-mosaic*
 obj-detection/cfgs
 obj-detection/train-obj
+obj-detection/predict-obj
 obj-detection/imgs-predict-obj
 obj-detection/save-mosaic*
 dataSets
