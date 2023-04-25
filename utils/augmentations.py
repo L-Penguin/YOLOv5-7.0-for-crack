@@ -15,6 +15,8 @@ import torchvision.transforms.functional as TF
 from utils.general import LOGGER, check_version, colorstr, resample_segments, segment2box, xywhn2xyxy
 from utils.metrics import bbox_ioa
 
+from math import ceil, floor
+
 IMAGENET_MEAN = 0.485, 0.456, 0.406  # RGB mean
 IMAGENET_STD = 0.229, 0.224, 0.225  # RGB standard deviation
 
@@ -308,7 +310,7 @@ def classify_albumentations(
         scale=(0.08, 1.0),
         ratio=(0.75, 1.0 / 0.75),  # 0.75, 1.33
         hflip=0.5,
-        vflip=0.0,
+        vflip=0.5,
         jitter=0.4,
         mean=IMAGENET_MEAN,
         std=IMAGENET_STD,
@@ -317,7 +319,7 @@ def classify_albumentations(
     prefix = colorstr('albumentations: ')
     try:
         import albumentations as A
-        from albumentations.pytorch import ToTensorV2
+        from albumentations.pytorch.transforms import ToTensorV2
         check_version(A.__version__, '1.0.3', hard=True)  # version requirement
         if augment:  # Resize and crop
             T = [A.RandomResizedCrop(height=size, width=size, scale=scale, ratio=ratio)]
@@ -334,7 +336,17 @@ def classify_albumentations(
                     T += [A.ColorJitter(*color_jitter, 0)]
         else:  # Use fixed crop for eval set (reproducibility)
             T = [A.SmallestMaxSize(max_size=size), A.CenterCrop(height=size, width=size)]
+
+        T += [A.RandomBrightnessContrast(brightness_limit=(0, 0.5), contrast_limit=0.3, brightness_by_max=True, p=0.5)]
+        T += [A.CoarseDropout(max_holes=7, max_height=15, max_width=15, min_holes=1, min_height=1,
+                              min_width=1, fill_value=0, mask_fill_value=None, p=0.5)]
+        T += [A.ElasticTransform(alpha=1, sigma=50, alpha_affine=50, interpolation=1, border_mode=3, value=None,
+                                 mask_value=None, p=0.5)]
+        T += [A.Perspective(scale=(0.05, 0.1), keep_size=True, pad_mode=0, pad_val=0, mask_pad_val=0, fit_output=False,
+                            interpolation=1, p=0.5)]
+
         T += [A.Normalize(mean=mean, std=std), ToTensorV2()]  # Normalize and convert to Tensor
+        # T += [ToTensorV2()]  # Normalize and convert to Tensor
         LOGGER.info(prefix + ', '.join(f'{x}'.replace('always_apply=False, ', '') for x in T if x.p))
         return A.Compose(T)
 
@@ -344,11 +356,75 @@ def classify_albumentations(
         LOGGER.info(f'{prefix}{e}')
 
 
-def classify_transforms(size=224):
+def classify_transforms(size=224, seg=False):
     # Transforms to apply if albumentations not installed
     assert isinstance(size, int), f'ERROR: classify_transforms size {size} must be integer, not (list, tuple)'
     # T.Compose([T.ToTensor(), T.Resize(size), T.CenterCrop(size), T.Normalize(IMAGENET_MEAN, IMAGENET_STD)])
-    return T.Compose([CenterCrop(size), ToTensor(), T.Normalize(IMAGENET_MEAN, IMAGENET_STD)])
+
+    if seg:
+        def seg(img):
+            result = []
+            imgArr, im = seg_img(img)
+            iter_w = len(imgArr[0])
+            iter_h = len(imgArr)
+
+            for i in range(iter_h):
+                temp = imgArr[i]
+                result.extend(temp)
+
+            for j in range(iter_h * iter_w):
+                func = T.Compose([CenterCrop(size), ToTensor(), T.Normalize(IMAGENET_MEAN, IMAGENET_STD)])
+                result[j] = func(result[j])
+                result[j] = torch.unsqueeze(result[j], 0)
+
+            return torch.cat(result, 0), (iter_h, iter_w), imgArr
+
+        return seg
+    else:
+        return T.Compose([CenterCrop(size), ToTensor(), T.Normalize(IMAGENET_MEAN, IMAGENET_STD)])
+
+
+def seg_img(img, s=224):
+    imgArr = []
+
+    h, w, _ = img.shape
+    if h < s or w < s:
+        t_1 = s // h
+        t_2 = s // w
+
+        t = max(t_1, t_2) + 1
+        im = cv2.resize(img, dsize=None, fx=t, fy=t, interpolation=cv2.INTER_LINEAR)
+    else:
+        im = img.copy()
+
+    # 添加的宽和高的边框像素值
+    b_h = s - (img.shape[0] % s)
+    b_w = s - (img.shape[1] % s)
+
+    if b_h == s:
+        b_h = 0
+
+    if b_w == s:
+        b_w = 0
+
+    # im = cv2.copyMakeBorder(im, floor(b_h / 2), ceil(b_h / 2), floor(b_w / 2), ceil(b_w / 2),
+    #                         borderType=cv2.BORDER_CONSTANT, value=(114, 114, 114))
+    im = cv2.copyMakeBorder(im, floor(b_h / 2), ceil(b_h / 2), floor(b_w / 2), ceil(b_w / 2),
+                            borderType=cv2.BORDER_REFLECT)
+
+    h_img, w_img, _ = im.shape
+
+    i_h, i_w = h_img // s, w_img // s
+
+    for i in range(i_h):
+        arr = []
+        for j in range(i_w):
+            img_temp = im[i * s:(i + 1) * s, j * s:(j + 1) * s]
+            arr.append(img_temp)
+
+        imgArr.append(arr)
+
+    return imgArr, im
 
 
 class LetterBox:
