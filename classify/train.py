@@ -94,7 +94,8 @@ def train(opt, device):
                                                    augment=True,
                                                    cache=opt.cache,
                                                    rank=LOCAL_RANK,
-                                                   workers=nw)
+                                                   workers=nw,
+                                                   save=opt.save_process)
 
     test_dir = data_dir / 'test' if (data_dir / 'test').exists() else data_dir / 'val'  # data/test or data/val
     if RANK in {-1, 0}:
@@ -276,11 +277,11 @@ def parse_opt(known=False):
     parser.add_argument('--data', type=str, default=r'../dataSets/crackSet-cls', help='cifar10, cifar100, mnist, imagenet, ...')
     parser.add_argument('--epochs', type=int, default=100, help='total training epochs')
     parser.add_argument('--batch-size', type=int, default=64, help='total batch size for all GPUs')
-    parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=227, help='train, val image size (pixels)')
+    parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=224, help='train, val image size (pixels)')
     parser.add_argument('--nosave', action='store_true', help='only save final checkpoint')
     parser.add_argument('--cache', type=str, nargs='?', const='ram', help='--cache images in "ram" (default) or "disk"')
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
-    parser.add_argument('--workers', type=int, default=8, help='max dataloader workers (per RANK in DDP mode)')
+    parser.add_argument('--workers', type=int, default=4, help='max dataloader workers (per RANK in DDP mode)')
     # parser.add_argument('--project', default=ROOT / 'runs/train-cls', help='save to project/name')
     parser.add_argument('--project', default='train-cls', help='save to project/name')
     parser.add_argument('--name', default='exp', help='save to project/name')
@@ -291,10 +292,13 @@ def parse_opt(known=False):
     parser.add_argument('--decay', type=float, default=5e-5, help='weight decay')
     parser.add_argument('--label-smoothing', type=float, default=0.1, help='Label smoothing epsilon')
     parser.add_argument('--cutoff', type=int, default=None, help='Model layer cutoff index for Classify() head')
-    parser.add_argument('--dropout', type=float, default=None, help='Dropout (fraction)')
+    parser.add_argument('--dropout', type=float, default=0.5, help='Dropout (fraction)')
     parser.add_argument('--verbose', action='store_true', help='Verbose mode')
     parser.add_argument('--seed', type=int, default=0, help='Global training seed')
     parser.add_argument('--local_rank', type=int, default=-1, help='Automatic DDP Multi-GPU argument, do not modify')
+
+    parser.add_argument('--save-process', action='store_true', help='Saving the pre-process imgs')
+
     return parser.parse_known_args()[0] if known else parser.parse_args()
 
 
@@ -332,5 +336,8 @@ def run(**kwargs):
 
 
 if __name__ == "__main__":
+    path = f'./imgs-process'
+    if not os.path.exists(path):
+        os.mkdir(path)
     opt = parse_opt()
     main(opt)
