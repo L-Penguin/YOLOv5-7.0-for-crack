@@ -36,8 +36,6 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 
-from utils.extra_modules import pic_concat
-
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[1]  # YOLOv5 root directory
 if str(ROOT) not in sys.path:
@@ -52,6 +50,7 @@ from utils.general import (LOGGER, Profile, check_file, check_img_size, check_im
 from utils.plots import Annotator
 from utils.torch_utils import select_device, smart_inference_mode
 
+from utils.extra_modules import pic_concat
 import math
 
 
