@@ -483,6 +483,8 @@ class LoadImagesAndLabels(Dataset):
             weights = f'../classify/train-cls/{self.cls_name}/weights/best.pt'
             if not os.path.exists(weights):
                 raise FileNotFoundError(f'ERROR: {os.path.abspath(weights)} is not found')
+
+            print(f'using cls weights to pre_process: {self.cls_name}')
             self.imgRoot += f'_{self.cls_name}'
 
             if not os.path.exists(self.imgRoot) and self.saveMosaicImg:
