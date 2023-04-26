@@ -30,6 +30,7 @@ parser.add_argument('--imgsz', default=0, type=int, help='')
 parser.add_argument('--bs', default=0, type=int, help='')
 parser.add_argument('--name', default='', type=str, help='')
 parser.add_argument('--rm', action='store_true', help='')
+parser.add_argument('--cls-name', default='', help='')
 parser.add_argument('--pre-process', action='store_true', help='')
 parser.add_argument('--save-mosaic', action='store_true', help='')
 
@@ -59,6 +60,9 @@ def get_command(opt):
         "project": f"train-{task}",
         "name": "exp_multiScale" if task != 'cls' else '',
     }
+
+    if task == 'obj' and opt.cls_name:
+        paramsDic['cls-name'] = opt.cls_name
 
     # cls时的name
     if task == 'cls':
