@@ -93,7 +93,7 @@ class ComputeLoss:
 
     # Compute losses
     def __init__(self, model, autobalance=False, CIoU=True, EIoU=False, SIoU=False):
-        print(f'Loss func type: {"CIoU" if CIoU else "EIoU" if EIoU else "SIoU" if SIoU else "ERROR!"}')
+        print(f'\nLoss func type: {"CIoU" if CIoU else "EIoU" if EIoU else "SIoU" if SIoU else "ERROR!"}\n')
         device = next(model.parameters()).device  # get model device
         h = model.hyp  # hyperparameters
 
