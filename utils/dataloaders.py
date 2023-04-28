@@ -766,6 +766,7 @@ class LoadImagesAndLabels(Dataset):
 
         return torch.from_numpy(img), labels_out, self.im_files[index], shapes
 
+    # 图像分类预处理
     def solve_obj_cls(self, img, labels):
         if labels.shape[0] == 0:
             return labels
@@ -782,6 +783,7 @@ class LoadImagesAndLabels(Dataset):
                         label_process[i] = False
             return labels[label_process]
 
+    # 保存mosaic增强的图像
     def save_mosaic_images(self, img, labels, index):
         workPath = os.getcwd()
 
