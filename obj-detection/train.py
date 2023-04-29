@@ -482,7 +482,7 @@ def parse_opt(known=False):
     parser.add_argument('--local_rank', type=int, default=-1, help='Automatic DDP Multi-GPU argument, do not modify')
 
     # 添加参数
-    parser.add_argument('--cls-name', default='yolov5s-cls', help='img classify name')
+    parser.add_argument('--cls-name', default='efficientnet_b0', help='img classify name')
     parser.add_argument('--save-mosaic', action='store_true', help='Saving the mosaic images')
     parser.add_argument('--pre-process', action='store_true', help='Using image classify solve training set')
     parser.add_argument('--kmeanspp', action='store_true', help='Using kmeanspp to get anchors')
