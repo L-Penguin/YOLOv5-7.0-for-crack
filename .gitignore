@@ -40,7 +40,8 @@ segment/mosaicImgs*+/*
 hyps
 classify/train-cls
 classify/imgs-predict-cls
-segment/cfgs
+segment/cfgs/*
+segment/cfgs_ago/*
 segment/train-seg
 segment/imgs-predict-seg
 segment/save-mosaic*
