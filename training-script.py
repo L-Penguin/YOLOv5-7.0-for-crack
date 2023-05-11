@@ -53,7 +53,7 @@ def get_command(opt):
         "cfg": f"./cfgs/yolov5s-{task}.yaml" if task != 'cls' else '',
         "data": f"./crack-{task}.yaml",
         "hyp": f"../hyps/hyp.scratch.yaml",
-        "epochs": 2000 if task != 'cls' else 100,
+        "epochs": 2000 if task != 'cls' else 200,
         "device": 0,
         "imgsz": 640 if task != 'cls' else 224,
         "batch-size": 12,
@@ -178,7 +178,7 @@ def get_command(opt):
     for f in check:
         f = paramsDic[f]
         if not os.path.exists(f):
-            raise FileNotFoundError(f'No such file: {f}!')
+            raise FileNotFoundError(f'No such file: {os.path.abspath(f)}!')
 
     if opt.rm:
         train_abs = os.path.abspath(train)
