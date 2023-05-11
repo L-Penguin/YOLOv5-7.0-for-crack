@@ -654,6 +654,7 @@ def run(**kwargs):
 
 
 if __name__ == "__main__":
+    torch.multiprocessing.set_start_method('spawn')
     if not os.path.exists(f'./save-mosaic'):
         os.makedirs(f'./save-mosaic')
     opt = parse_opt()
