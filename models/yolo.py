@@ -89,13 +89,14 @@ class Detect(nn.Module):
         return grid, anchor_grid
 
 
-class Detect_Decoupled(nn.Module):
+# 方案1
+class Detect_Decoupled_1(nn.Module):
     # YOLOv5 Detect head for detection models
     stride = None  # strides computed during build
     dynamic = False  # force grid reconstruction
     export = False  # export mode
 
-    def __init__(self, nc=80, anchors=(), ch=(), inplace=True):  # detection layer
+    def __init__(self, nc=80, anchors=(), e=1.0, ch=(), inplace=True):  # detection layer
         super().__init__()
         self.nc = nc  # number of classes
         self.no = nc + 5  # number of outputs per anchor
@@ -104,29 +105,35 @@ class Detect_Decoupled(nn.Module):
         self.grid = [torch.empty(0) for _ in range(self.nl)]  # init grid
         self.anchor_grid = [torch.empty(0) for _ in range(self.nl)]  # init anchor grid
         self.register_buffer('anchors', torch.tensor(anchors).float().view(self.nl, -1, 2))  # shape(nl,na,2)
-        self.m_stem = nn.ModuleList(Conv(x, x, 1) for x in ch)  # stem conv
+        self.m_stem = nn.ModuleList(Conv(x, int(x * e), 1) for x in ch)  # stem conv
+
         self.m_cls = nn.ModuleList(
-            nn.Sequential(Conv(x, x, 3), nn.Conv2d(x, self.na * self.nc, 1)) for x in ch)  # cls conv
-        self.m_reg_conf = nn.ModuleList(Conv(x, x, 3) for x in ch)  # reg_conf stem conv
-        self.m_reg = nn.ModuleList(nn.Conv2d(x, self.na * 4, 1) for x in ch)  # reg conv
-        self.m_conf = nn.ModuleList(nn.Conv2d(x, self.na * 1, 1) for x in ch)  # conf conv
+            nn.Sequential(Conv(int(x * e), int(x * e), 3), nn.Conv2d(int(x * e), self.na * self.nc, 1)) for x in
+            ch)  # cls conv
+        self.m_reg_conf = nn.ModuleList(Conv(int(x * e), int(x * e), 3) for x in ch)  # reg_conf stem conv
+        self.m_reg = nn.ModuleList(nn.Conv2d(int(x * e), self.na * 4, 1) for x in ch)  # reg conv
+        self.m_conf = nn.ModuleList(nn.Conv2d(int(x * e), self.na * 1, 1) for x in ch)  # conf conv
 
         self.inplace = inplace  # use inplace ops (e.g. slice assignment)
         # 实例分割解耦
         if isinstance(self, Segment_Decoupled):
-            self.seg = nn.ModuleList(nn.Sequential(Conv(x, x, 3), nn.Conv2d(x, self.na*32, 1)) for x in ch)
+            self.seg = nn.ModuleList(
+                nn.Sequential(Conv(int(x * e), int(x * e), 3), nn.Conv2d(int(x*e), self.na * 32, 1)) for x in ch)
 
     def forward(self, x):
         z = []  # inference output
         for i in range(self.nl):
+            # 预测 分类回归 预测框回归 置信度回归 共同分支
             x[i] = self.m_stem[i](x[i])  # conv
 
             bs, _, ny, nx = x[i].shape
-            # 预测分类信息
+            # 预测 分类回归 检测头
             x_cls = self.m_cls[i](x[i]).view(bs, self.na, self.nc, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
-            #
+            # 预测框和置信度 共同分支
             x_reg_conf = self.m_reg_conf[i](x[i])
+            # 预测 预测框回归 检测头
             x_reg = self.m_reg[i](x_reg_conf).view(bs, self.na, 4, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
+            # 预测 置信度回归 检测头
             x_conf = self.m_conf[i](x_reg_conf).view(bs, self.na, 1, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
 
             # 实例分割的解耦头
@@ -165,6 +172,263 @@ class Detect_Decoupled(nn.Module):
         return grid, anchor_grid
 
 
+# 方案2
+class Detect_Decoupled_2(nn.Module):
+    # YOLOv5 Detect head for detection models
+    stride = None  # strides computed during build
+    dynamic = False  # force grid reconstruction
+    export = False  # export mode
+
+    def __init__(self, nc=80, anchors=(), e=1.0, ch=(), inplace=True):  # detection layer
+        super().__init__()
+        self.nc = nc  # number of classes
+        self.no = nc + 5  # number of outputs per anchor
+        self.nl = len(anchors)  # number of detection layers
+        self.na = len(anchors[0]) // 2  # number of anchors
+        self.grid = [torch.empty(0) for _ in range(self.nl)]  # init grid
+        self.anchor_grid = [torch.empty(0) for _ in range(self.nl)]  # init anchor grid
+        self.register_buffer('anchors', torch.tensor(anchors).float().view(self.nl, -1, 2))  # shape(nl,na,2)
+        self.m_stem = nn.ModuleList(Conv(x, int(x*e), 1) for x in ch)  # stem conv
+
+        self.m_conf_cls = nn.ModuleList(
+            nn.Sequential(Conv(int(x*e), int(x*e), 3), nn.Conv2d(int(x*e), self.na * (1+self.nc), 1)) for x in ch
+        )
+        self.m_reg = nn.ModuleList(
+            nn.Sequential(Conv(int(x*e), int(x*e), 3), nn.Conv2d(int(x*e), self.na * 4, 1)) for x in ch
+        )
+
+        self.inplace = inplace  # use inplace ops (e.g. slice assignment)
+        # 实例分割解耦
+        if isinstance(self, Segment_Decoupled):
+            self.seg = nn.ModuleList(
+                nn.Sequential(Conv(int(x*e), int(x*e), 3), nn.Conv2d(int(x*e), self.na * 32, 1)) for x in ch
+            )
+
+    def forward(self, x):
+        z = []  # inference output
+        for i in range(self.nl):
+            # 预测 分类回归 预测框回归 置信度回归 共同分支
+            x[i] = self.m_stem[i](x[i])  # conv
+
+            bs, _, ny, nx = x[i].shape
+
+            # 预测 置信度回归 分类回归 检测头
+            x_conf_cls = self.m_conf_cls[i](x[i]).view(bs, self.na, 1+self.nc, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
+
+            # 预测 预测框回归 检测头
+            x_reg = self.m_reg[i](x[i]).view(bs, self.na, 4, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
+
+            # 实例分割的解耦头
+            if isinstance(self, Segment_Decoupled):
+                x_seg = self.seg[i](x[i]).view(bs, self.na, 32, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
+                x[i] = torch.cat([x_reg, x_conf_cls, x_seg], dim=4)
+            else:
+                x[i] = torch.cat([x_reg, x_conf_cls], dim=4)
+
+            if not self.training:  # inference
+                if self.dynamic or self.grid[i].shape[2:4] != x[i].shape[2:4]:
+                    self.grid[i], self.anchor_grid[i] = self._make_grid(nx, ny, i)
+
+                if isinstance(self, (Segment, Segment_Decoupled)):  # (boxes + masks)
+                    xy, wh, conf, mask = x[i].split((2, 2, self.nc + 1, self.no - self.nc - 5), 4)
+                    xy = (xy.sigmoid() * 2 + self.grid[i]) * self.stride[i]  # xy
+                    wh = (wh.sigmoid() * 2) ** 2 * self.anchor_grid[i]  # wh
+                    y = torch.cat((xy, wh, conf.sigmoid(), mask), 4)
+                else:  # Detect (boxes only)
+                    xy, wh, conf = x[i].sigmoid().split((2, 2, self.nc + 1), 4)
+                    xy = (xy * 2 + self.grid[i]) * self.stride[i]  # xy
+                    wh = (wh * 2) ** 2 * self.anchor_grid[i]  # wh
+                    y = torch.cat((xy, wh, conf), 4)
+                z.append(y.view(bs, self.na * nx * ny, self.no))
+
+        return x if self.training else (torch.cat(z, 1),) if self.export else (torch.cat(z, 1), x)
+
+    def _make_grid(self, nx=20, ny=20, i=0, torch_1_10=check_version(torch.__version__, '1.10.0')):
+        d = self.anchors[i].device
+        t = self.anchors[i].dtype
+        shape = 1, self.na, ny, nx, 2  # grid shape
+        y, x = torch.arange(ny, device=d, dtype=t), torch.arange(nx, device=d, dtype=t)
+        yv, xv = torch.meshgrid(y, x, indexing='ij') if torch_1_10 else torch.meshgrid(y, x)  # torch>=0.7 compatibility
+        grid = torch.stack((xv, yv), 2).expand(shape) - 0.5  # add grid offset, i.e. y = 2.0 * x - 0.5
+        anchor_grid = (self.anchors[i] * self.stride[i]).view((1, self.na, 1, 1, 2)).expand(shape)
+        return grid, anchor_grid
+
+
+# 方案3
+class Detect_Decoupled_3(nn.Module):
+    # YOLOv5 Detect head for detection models
+    stride = None  # strides computed during build
+    dynamic = False  # force grid reconstruction
+    export = False  # export mode
+
+    def __init__(self, nc=80, anchors=(), e=1.0, ch=(), inplace=True):  # detection layer
+        super().__init__()
+        self.nc = nc  # number of classes
+        self.no = nc + 5  # number of outputs per anchor
+        self.nl = len(anchors)  # number of detection layers
+        self.na = len(anchors[0]) // 2  # number of anchors
+        self.grid = [torch.empty(0) for _ in range(self.nl)]  # init grid
+        self.anchor_grid = [torch.empty(0) for _ in range(self.nl)]  # init anchor grid
+        self.register_buffer('anchors', torch.tensor(anchors).float().view(self.nl, -1, 2))  # shape(nl,na,2)
+        self.m_stem = nn.ModuleList(Conv(x, int(x*e), 1) for x in ch)  # stem conv
+
+        self.m_conf = nn.ModuleList(
+            nn.Sequential(Conv(int(x*e), int(x*e), 3), nn.Conv2d(int(x*e), self.na * 1, 1)) for x in ch
+        )
+        self.m_cls = nn.ModuleList(
+            nn.Sequential(Conv(int(x * e), int(x * e), 3), nn.Conv2d(int(x * e), self.na * self.nc, 1)) for x in ch
+        )
+        self.m_reg = nn.ModuleList(
+            nn.Sequential(Conv(int(x*e), int(x*e), 3), nn.Conv2d(int(x*e), self.na * 4, 1)) for x in ch
+        )
+
+        self.inplace = inplace  # use inplace ops (e.g. slice assignment)
+        # 实例分割解耦
+        if isinstance(self, Segment_Decoupled):
+            self.seg = nn.ModuleList(
+                nn.Sequential(Conv(int(x*e), int(x*e), 3), nn.Conv2d(int(x*e), self.na * 32, 1)) for x in ch
+            )
+
+    def forward(self, x):
+        z = []  # inference output
+        for i in range(self.nl):
+            # 预测 分类回归 预测框回归 置信度回归 共同分支
+            x[i] = self.m_stem[i](x[i])  # conv
+
+            bs, _, ny, nx = x[i].shape
+
+            # 预测 置信度回归 检测头
+            x_conf = self.m_conf[i](x[i]).view(bs, self.na, 1, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
+
+            # 预测 分类回归 检测头
+            x_cls = self.m_cls[i](x[i]).view(bs, self.na, self.nc, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
+
+            # 预测 预测框回归 检测头
+            x_reg = self.m_reg[i](x[i]).view(bs, self.na, 4, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
+
+            # 实例分割的解耦头
+            if isinstance(self, Segment_Decoupled):
+                x_seg = self.seg[i](x[i]).view(bs, self.na, 32, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
+                x[i] = torch.cat([x_reg, x_conf, x_cls, x_seg], dim=4)
+            else:
+                x[i] = torch.cat([x_reg, x_conf, x_cls], dim=4)
+
+            if not self.training:  # inference
+                if self.dynamic or self.grid[i].shape[2:4] != x[i].shape[2:4]:
+                    self.grid[i], self.anchor_grid[i] = self._make_grid(nx, ny, i)
+
+                if isinstance(self, (Segment, Segment_Decoupled)):  # (boxes + masks)
+                    xy, wh, conf, mask = x[i].split((2, 2, self.nc + 1, self.no - self.nc - 5), 4)
+                    xy = (xy.sigmoid() * 2 + self.grid[i]) * self.stride[i]  # xy
+                    wh = (wh.sigmoid() * 2) ** 2 * self.anchor_grid[i]  # wh
+                    y = torch.cat((xy, wh, conf.sigmoid(), mask), 4)
+                else:  # Detect (boxes only)
+                    xy, wh, conf = x[i].sigmoid().split((2, 2, self.nc + 1), 4)
+                    xy = (xy * 2 + self.grid[i]) * self.stride[i]  # xy
+                    wh = (wh * 2) ** 2 * self.anchor_grid[i]  # wh
+                    y = torch.cat((xy, wh, conf), 4)
+                z.append(y.view(bs, self.na * nx * ny, self.no))
+
+        return x if self.training else (torch.cat(z, 1),) if self.export else (torch.cat(z, 1), x)
+
+    def _make_grid(self, nx=20, ny=20, i=0, torch_1_10=check_version(torch.__version__, '1.10.0')):
+        d = self.anchors[i].device
+        t = self.anchors[i].dtype
+        shape = 1, self.na, ny, nx, 2  # grid shape
+        y, x = torch.arange(ny, device=d, dtype=t), torch.arange(nx, device=d, dtype=t)
+        yv, xv = torch.meshgrid(y, x, indexing='ij') if torch_1_10 else torch.meshgrid(y, x)  # torch>=0.7 compatibility
+        grid = torch.stack((xv, yv), 2).expand(shape) - 0.5  # add grid offset, i.e. y = 2.0 * x - 0.5
+        anchor_grid = (self.anchors[i] * self.stride[i]).view((1, self.na, 1, 1, 2)).expand(shape)
+        return grid, anchor_grid
+
+
+# 方案4，单分类使用
+class Detect_Decoupled_4(nn.Module):
+    # YOLOv5 Detect head for detection models
+    stride = None  # strides computed during build
+    dynamic = False  # force grid reconstruction
+    export = False  # export mode
+
+    def __init__(self, nc=80, anchors=(), e=1.0, ch=(), inplace=True):  # detection layer
+        super().__init__()
+        self.nc = nc  # number of classes
+        self.no = nc + 5  # number of outputs per anchor
+        self.nl = len(anchors)  # number of detection layers
+        self.na = len(anchors[0]) // 2  # number of anchors
+        self.grid = [torch.empty(0) for _ in range(self.nl)]  # init grid
+        self.anchor_grid = [torch.empty(0) for _ in range(self.nl)]  # init anchor grid
+        self.register_buffer('anchors', torch.tensor(anchors).float().view(self.nl, -1, 2))  # shape(nl,na,2)
+        self.m_stem = nn.ModuleList(Conv(x, int(x*e), 1) for x in ch)  # stem conv
+
+        self.m_conf_cls = nn.ModuleList(
+            nn.Sequential(Conv(int(x*e), int(x*e), 3), nn.Conv2d(int(x*e), self.na * 1, 1)) for x in ch
+        )
+        self.m_reg = nn.ModuleList(
+            nn.Sequential(Conv(int(x*e), int(x*e), 3), nn.Conv2d(int(x*e), self.na * 4, 1)) for x in ch
+        )
+
+        self.inplace = inplace  # use inplace ops (e.g. slice assignment)
+        # 实例分割解耦
+        if isinstance(self, Segment_Decoupled):
+            self.seg = nn.ModuleList(
+                nn.Sequential(Conv(int(x*e), int(x*e), 3), nn.Conv2d(int(x*e), self.na * 32, 1)) for x in ch
+            )
+
+    def forward(self, x):
+        z = []  # inference output
+        for i in range(self.nl):
+            # 预测 分类回归 预测框回归 置信度回归 共同分支
+            x[i] = self.m_stem[i](x[i])  # conv
+
+            bs, _, ny, nx = x[i].shape
+
+            # 预测 置信度回归 分类回归 检测头
+            x_conf_cls = self.m_conf_cls[i](x[i]).view(bs, self.na, 1, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
+
+            # 预测 预测框回归 检测头
+            x_reg = self.m_reg[i](x[i]).view(bs, self.na, 4, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
+
+            # 实例分割的解耦头
+            if isinstance(self, Segment_Decoupled):
+                x_seg = self.seg[i](x[i]).view(bs, self.na, 32, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
+                x[i] = torch.cat([x_reg, x_conf_cls, x_conf_cls, x_seg], dim=4)
+            else:
+                x[i] = torch.cat([x_reg, x_conf_cls, x_conf_cls], dim=4)
+
+            if not self.training:  # inference
+                if self.dynamic or self.grid[i].shape[2:4] != x[i].shape[2:4]:
+                    self.grid[i], self.anchor_grid[i] = self._make_grid(nx, ny, i)
+
+                if isinstance(self, (Segment, Segment_Decoupled)):  # (boxes + masks)
+                    xy, wh, conf, mask = x[i].split((2, 2, self.nc + 1, self.no - self.nc - 5), 4)
+                    xy = (xy.sigmoid() * 2 + self.grid[i]) * self.stride[i]  # xy
+                    wh = (wh.sigmoid() * 2) ** 2 * self.anchor_grid[i]  # wh
+                    y = torch.cat((xy, wh, conf.sigmoid(), mask), 4)
+                else:  # Detect (boxes only)
+                    xy, wh, conf = x[i].sigmoid().split((2, 2, self.nc + 1), 4)
+                    xy = (xy * 2 + self.grid[i]) * self.stride[i]  # xy
+                    wh = (wh * 2) ** 2 * self.anchor_grid[i]  # wh
+                    y = torch.cat((xy, wh, conf), 4)
+                z.append(y.view(bs, self.na * nx * ny, self.no))
+
+        return x if self.training else (torch.cat(z, 1),) if self.export else (torch.cat(z, 1), x)
+
+    def _make_grid(self, nx=20, ny=20, i=0, torch_1_10=check_version(torch.__version__, '1.10.0')):
+        d = self.anchors[i].device
+        t = self.anchors[i].dtype
+        shape = 1, self.na, ny, nx, 2  # grid shape
+        y, x = torch.arange(ny, device=d, dtype=t), torch.arange(nx, device=d, dtype=t)
+        yv, xv = torch.meshgrid(y, x, indexing='ij') if torch_1_10 else torch.meshgrid(y, x)  # torch>=0.7 compatibility
+        grid = torch.stack((xv, yv), 2).expand(shape) - 0.5  # add grid offset, i.e. y = 2.0 * x - 0.5
+        anchor_grid = (self.anchors[i] * self.stride[i]).view((1, self.na, 1, 1, 2)).expand(shape)
+        return grid, anchor_grid
+
+
+class Detect_Decoupled(Detect_Decoupled_4):
+    def __init__(self, nc=80, anchors=(), e=1.0, ch=(), inplace=True):
+        super().__init__(nc=nc, anchors=anchors, e=e, ch=ch, inplace=inplace)
+
+
 class Segment(Detect):
     # YOLOv5 Segment head for segmentation models
     def __init__(self, nc=80, anchors=(), nm=32, npr=256, ch=(), inplace=True):
@@ -184,8 +448,8 @@ class Segment(Detect):
 
 class Segment_Decoupled(Detect_Decoupled):
     # YOLOv5 Segment head for segmentation models
-    def __init__(self, nc=80, anchors=(), nm=32, npr=256, ch=(), inplace=True):
-        super().__init__(nc, anchors, ch, inplace)
+    def __init__(self, nc=80, anchors=(), nm=32, npr=256, e=1.0, ch=(), inplace=True):
+        super().__init__(nc=nc, anchors=anchors, e=e, ch=ch, inplace=inplace)
         self.nm = nm  # number of masks
         self.npr = npr  # number of protos
         self.no = 5 + nc + self.nm  # number of outputs per anchor
@@ -437,12 +701,12 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
         n = n_ = max(round(n * gd), 1) if n > 1 else n  # depth gain
 
         if m in {
-                Conv, GhostConv, Bottleneck, GhostBottleneck, SPP, SPPF, DWConv, MixConv2d, Focus, CrossConv,
-                BottleneckCSP, C3, C3TR, C3SPP, C3Ghost, nn.ConvTranspose2d, DWConvTranspose2d, C3x, SPPFCSPC, ASPP,
-                ASPPF, NewC3, SE, C3SE, C3_SE, CBAM, C3CBAM, C3_CBAM, CA, C3CA, C3_CA, ECA, C3ECA, C3_ECA, DCN, C3DCN,
-                C3DCN_CA, C3DCNCA_CA, NewC3CA, NewC3DCN, NewC3DCNCA, NewC3_CA, NewC3CA_CA, NewC3DCN_CA, NewC3DCNCA_CA,
-                NewC3_1CA, NewC3CA_1CA, NewC3DCN_1CA, NewC3DCNCA_1CA, NewC3_CA_1CA, NewC3CA_CA_1CA, NewC3DCN_CA_1CA,
-                NewC3DCNCA_CA_1CA, C3DCNCA, C3CA_CA, DCNv2, NewASPP, NewASPPF
+            Conv, GhostConv, Bottleneck, GhostBottleneck, SPP, SPPF, DWConv, MixConv2d, Focus, CrossConv,
+            BottleneckCSP, C3, C3TR, C3SPP, C3Ghost, nn.ConvTranspose2d, DWConvTranspose2d, C3x, ASPP,
+            NewC3, SE, C3SE, C3_SE, CBAM, C3CBAM, C3_CBAM, CA, C3CA, C3_CA, ECA, C3ECA, C3_ECA, DCN, C3DCN,
+            C3DCN_CA, C3DCNCA_CA, NewC3CA, NewC3DCN, NewC3DCNCA, NewC3_CA, NewC3CA_CA, NewC3DCN_CA, NewC3DCNCA_CA,
+            NewC3_1CA, NewC3CA_1CA, NewC3DCN_1CA, NewC3DCNCA_1CA, NewC3_CA_1CA, NewC3CA_CA_1CA, NewC3DCN_CA_1CA,
+            NewC3DCNCA_CA_1CA, C3DCNCA, C3CA_CA, DCNv2,
         }:
             # c1为输入通道数、c2为输出通道数
             c1, c2 = ch[f], args[0]
