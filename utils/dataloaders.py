@@ -490,7 +490,7 @@ class LoadImagesAndLabels(Dataset):
             if not os.path.exists(self.imgRoot) and self.saveMosaicImg:
                 os.mkdir(self.imgRoot)
 
-            self.img_cls = image_classify(weights=weights, device='cpu')
+            self.img_cls = image_classify(weights=weights, device=device)
 
         try:
             f = []  # image files
