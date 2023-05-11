@@ -1504,7 +1504,7 @@ class NewC3DCNCA_CA_1CA(NewC3_CA_1CA):
     NewC3_1CA、NewC3CA_1CA、NewC3DCN_1CA、NewC3DCNCA_1CA、NewC3_CA_1CA、NewC3CA_CA_1CA、NewC3DCN_CA_1CA、NewC3DCNCA_CA_1CA、
 """
 
-
+"""
 # 空洞空间卷积池化金字塔
 class ASPP(nn.Module):
     def __init__(self, in_channel=512, depth=256):
@@ -1554,6 +1554,7 @@ class SPPFCSPC(nn.Module):
         y1 = self.cv6(self.cv5(torch.cat((x1, x2, x3, self.m(x3)), 1)))
         y2 = self.cv2(x)
         return self.cv7(torch.cat((y1, y2), dim=1))
+"""
 
 
 # --------------------------DCNv2 start--------------------------
@@ -1625,7 +1626,7 @@ class Space2Depth(nn.Module):
     def forward(self, x):
         return torch.cat([x[..., ::2, ::2], x[..., 1::2, ::2], x[..., ::2, 1::2], x[..., 1::2, 1::2]], self.d)
 
-
+"""
 # ASPP中空洞卷积由串联变并联
 class ASPPF(nn.Module):
     def __init__(self, c=512, d=512):
@@ -1655,7 +1656,7 @@ class ASPPF(nn.Module):
 
         out = self.cv3(torch.cat([x3, x1, x2_1, x2_2, x2_3], dim=1))
         return out
-
+"""
 
 class LBP(nn.Module):
     def __init__(self, lp=24, lr=5):
@@ -1693,7 +1694,7 @@ class ASPPPooling(nn.Sequential):   # 池化 -> 1*1 卷积 -> 上采样
 
     # 整个 ASPP 架构
 
-
+"""
 class NewASPP(nn.Module):
     def __init__(self, c_in, c_out=512, atrous_rates=[6, 12, 18]):
         super().__init__()
@@ -1703,7 +1704,7 @@ class NewASPP(nn.Module):
         # 多尺度空洞卷积
         rates = tuple(atrous_rates)
         for rate in rates:
-            modules.append(Conv(c_in, c_out, 3, d=rate))
+            modules.append(Conv(c_in, c_out, 3, p=rate, d=rate))
 
         # 池化
         modules.append(ASPPPooling(c_in, c_out))
@@ -1720,8 +1721,8 @@ class NewASPP(nn.Module):
 
         res = torch.cat(res, dim=1)
         return self.project(res)
-
-
+"""
+"""
 class NewASPPF(nn.Module):
     def __init__(self, c_in, c_out, num=3):
         super().__init__()
@@ -1730,9 +1731,9 @@ class NewASPPF(nn.Module):
         # 降维
         c_cen = int(shrink * c_in)
 
-        self.dilation_1 = nn.Sequential(Conv(c_in, c_cen, 3, d=3), Conv(c_cen, c_in, 3, d=4))
-        self.dilation_2 = nn.Sequential(Conv(c_in, c_cen, 3, d=3), Conv(c_cen, c_in, 3, d=4))
-        self.dilation_3 = nn.Sequential(Conv(c_in, c_cen, 3, d=3), Conv(c_cen, c_in, 3, d=4))
+        self.dilation_1 = nn.Sequential(Conv(c_in, c_cen, 3, p=3, d=3), Conv(c_cen, c_in, 3, p=4, d=4))
+        self.dilation_2 = nn.Sequential(Conv(c_in, c_cen, 3, p=3, d=3), Conv(c_cen, c_in, 3, p=4, d=4))
+        self.dilation_3 = nn.Sequential(Conv(c_in, c_cen, 3, p=3, d=3), Conv(c_cen, c_in, 3, p=4, d=4))
 
         self.pool = ASPPPooling(c_in, c_out)
 
@@ -1745,3 +1746,98 @@ class NewASPPF(nn.Module):
         x2_3 = self.dilation_3(x2_2)
         x3 = self.pool(x)
         return self.cv2(torch.cat([x1, x2_1, x2_2, x2_3, x3], dim=1))
+"""
+
+'''
+    TODO
+    ASPP模块使用不同扩张率的串联、并联结构，实验使用残差结构的空洞卷积，注意输入尺寸在640imgsz为(20,20)
+    ASPP原型使用扩张率为[6, 12, 18]，转换为SPPF种扩张率应该为[2, 4, 6]，两者都需要实现比较
+'''
+
+
+class ASPP(nn.Module):
+    def __init__(self, c_in, c_out=512, atrous_rates=(6, 12, 18), t=0, conv=0, e=1.0, dropout=0):
+        """
+        方案1：
+        方案2：
+        方案3：
+        方案4：
+        方案5：
+        Args:
+            c_in: 输入维度
+            c_out: 输出维度
+            atrous_rates: 空洞卷积扩张率
+            t: 空洞卷积结构，并联或者串联，0表示
+            conv: 串联时使用卷积层，0表示不适用，1表示使用
+            e: 是否使用降维，需要串联结构并有卷积层
+            dropout: 是否使用dropout，0表示不开启
+        """
+        super().__init__()
+
+        # 选择空洞卷积连接方式
+        self.type = bool(t)
+        # 是否使用3*3卷积层扩充感受野，前提是使用串联结构
+        self.conv = bool(conv) and self.type
+        # 降维比例
+        self.e = float(e)
+        # 降维，前提是使用了conv
+        c_cen = int(c_in * self.e) if self.conv else c_out
+        # 是否使用dropout
+        self.dropout = bool(dropout)
+
+        # 1*1 卷积层
+        self.b_1 = Conv(c_in, c_out)
+
+        # 空洞卷积层
+        rates = tuple(atrous_rates)
+        atrous = []
+
+        if self.conv:
+            atrous.append(nn.MaxPool2d(kernel_size=3, stride=1, padding=3 // 2))
+
+        l = len(rates)
+        for i, rate in enumerate(rates):
+            c = c_cen if i == 0 else c_out
+            atrous.append(Conv(c, c_out, 3, p=rate, d=rate))
+        self.b_2 = nn.ModuleList(atrous)
+
+        # ASSP池化
+        self.b_3 = ASPPPooling(c_in, c_out)
+
+        # concat后的卷积层，是否使用dropout
+        self.b_4 = nn.Sequential(Conv((l+2)*c_out, c_out), nn.Dropout(0.5)) if self.dropout else Conv((l+2)*c_out, c_out)
+
+    def forward(self, x):
+        result = []
+        # 第一层输出
+        x_1 = self.b_1(x)
+        result.append(x_1)
+
+        # 第二层输出，区分串联和并联，输出为数组形式
+        if self.type:
+            res_2 = []
+            # 串联结构
+            for index, astrous in enumerate(self.b_2):
+                if bool(index):
+                    res_2.append(astrous(res_2[-1]))
+                else:
+                    res_2.append(astrous(x))
+
+            if self.conv:
+                result.extend(res_2[1:])
+            else:
+                result.extend(res_2)
+        else:
+            # 并联结构
+            for astrous in self.b_2:
+                result.append(astrous(x))
+
+        # 第三层输出
+        x_3 = self.b_3(x)
+        result.append(x_3)
+
+        res = self.b_4(torch.cat(result, dim=1))
+
+        return res
+
+
