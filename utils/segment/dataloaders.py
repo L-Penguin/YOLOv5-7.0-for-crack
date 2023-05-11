@@ -19,6 +19,8 @@ from .augmentations import mixup, random_perspective
 
 import torch.nn.functional as F
 
+from utils.extra_modules import image_classify
+
 RANK = int(os.getenv('RANK', -1))
 
 
@@ -116,10 +118,26 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
                          stride, pad, min_items, prefix)
         self.downsample_ratio = downsample_ratio
         self.overlap = overlap
+        # 图像预处理参数
         self.pre_process = pre_process
+        # 保存
         self.saveMosaicImg = saveMosaicImg
         self.rotate = rotate
         self.mosaic9 = mosaic9
+
+        self.dilate = 5
+
+        self.imgRoot = f'save-mosaic'
+        if self.pre_process:
+            weights = f'../classify/train-cls/efficientnet_b0/weights/best.pt'
+            if not os.path.exists(weights):
+                raise FileNotFoundError(f'ERROR: {os.path.abspath(weights)} is not found')
+
+            if not os.path.exists(self.imgRoot) and self.saveMosaicImg:
+                os.mkdir(self.imgRoot)
+
+            self.img_cls = image_classify(weights=weights, device='cpu')
+            print(f'using cls weight: {weights}')
 
     def __getitem__(self, index):
         index = self.indices[index]  # linear, shuffled, or image_weights
@@ -216,10 +234,24 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
             # Cutouts  # labels = cutout(img, labels, p=0.5)
         # 需要搭配no-overlap使用
         if self.pre_process:
-            new_masks, new_labels = self.solve_masks_labels(masks, labels, img.shape)
+            new_masks, new_labels = self.solve_masks_labels(masks.clone(), labels.copy(), img.shape)
+
+            # 图像分类处理
+            if new_labels.shape[0] != 0:
+                label_process = np.array([True for _ in range(new_labels.shape[0])])
+                labels_xyxy = xywhn2xyxy(new_labels[:, 1:], img.shape[0], img.shape[1], 0, 0)
+                for i, l in enumerate(labels_xyxy):
+                    point_1 = (int(l[0]), int(l[1]))
+                    point_2 = (int(l[2]), int(l[3]))
+
+                    img_obj = self.img_crop(img, point_1, point_2)
+                    if self.pre_process:
+                        if not self.img_cls(img_obj):
+                            label_process[i] = False
+                new_masks = new_masks[label_process]
+                new_labels = new_labels[label_process]
+
             nl = len(new_labels)
-            if new_masks.shape[0]:
-                new_masks = torch.squeeze(self.tensor_dilate(torch.unsqueeze(new_masks, 0), 3), 0)
         else:
             new_masks, new_labels = masks, labels
 
@@ -239,25 +271,20 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
 
     # 解决标签问题
     def solve_masks_labels(self, masks, labels, shape):
+        if not masks.shape[0]:
+            return masks, labels
+
         # 将遮盖层和标签进行处理，相接的遮盖层连接在一起并将标签合并
         masks_float32 = masks.type(torch.float32)
-        try:
-            masks_numpy = F.interpolate(masks_float32[None],
-                                        shape[:2],
-                                        mode='bilinear',
-                                        align_corners=False)[0].cpu().numpy()
-        except RuntimeError:
-            masks_numpy = masks_float32.reshape((-1, shape[0], shape[1]))
+        masks_1 = torch.squeeze(self.tensor_dilate(masks_float32[None], self.dilate), 0)
 
-        kernel = np.ones((3, 3))
-        for i, m in enumerate(masks_numpy):
-            masks_numpy[i] = cv2.filter2D(m, -1, kernel)
+        masks_1 = F.interpolate(masks_1[None], shape[:2], mode='bilinear', align_corners=False)[0]
 
+        # 记录合并的索引
         connectArr = []
-        masks_numpy[masks_numpy > 0] = 1
-        for i in range(len(masks_numpy) - 1):
-            for j in range(i + 1, len(masks_numpy)):
-                if (masks_numpy[i] + masks_numpy[j]).max() == 2:
+        for i in range(len(masks_1) - 1):
+            for j in range(i + 1, len(masks_1)):
+                if (masks_1[i] + masks_1[j]).max() >= 2:
                     if len(connectArr) != 0:
                         for index, arr in enumerate(connectArr):
                             if len(set(arr + [i, j])) < len(arr) + 2:
@@ -266,8 +293,11 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
                                 connectArr.append([i, j])
                     else:
                         connectArr.append([i, j])
-        new_masks, new_labels = self.concat_masks_labels(masks.cpu().numpy(), labels.copy(), connectArr, shape)
-        new_masks = torch.tensor(new_masks, dtype=torch.uint8)
+
+        if len(connectArr):
+            new_masks, new_labels = self.concat_masks_labels(masks, labels, connectArr, shape)
+        else:
+            return masks, labels
 
         return new_masks, new_labels
 
@@ -275,53 +305,84 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
     def concat_masks_labels(self, masks, labels, target, shape):
         saveIndex = np.zeros(len(masks)) == 0
         for t in target:
+            index = t[0]
             # 合并mask并赋值
-            masks[t[0]] = masks[t].sum(axis=0)
-            masks[t[0], masks[t[0]] > 0] = 1
+            masks[index] = masks[t].sum(axis=0)
+            masks[index, masks[index] > 0] = 1
+
+            masks[index] = torch.squeeze(
+                self.tensor_dilate(
+                    self.tensor_dilate(
+                        masks[index][None, None],
+                        self.dilate),
+                    self.dilate-2,
+                    True)
+            )
+
             # 合并labels并赋值
             labels_ = xywhn2xyxy(labels[t, 1:], shape[0], shape[1], 0, 0)
             x_labels = labels_[:, [0, 2]]
             x_min, x_max = x_labels.min(), x_labels.max()
             y_labels = labels_[:, [1, 3]]
             y_min, y_max = y_labels.min(), y_labels.max()
-            labels[t[0], 1:5] = xyxy2xywhn(np.array([x_min, y_min, x_max, y_max]).reshape(1, -1),
-                                           shape[0],
-                                           shape[1],
-                                           clip=True,
-                                           eps=1e-3)
+            labels[index, 1:5] = xyxy2xywhn(np.array([x_min, y_min, x_max, y_max]).reshape(1, -1), shape[0], shape[1],
+                                            clip=True, eps=1e-3)
 
             saveIndex[t[1:]] = False
         # 去除合并所剩余的mask
         return masks[saveIndex], labels[saveIndex]
 
-    def tensor_dilate(self, bin_img, ksize=3):
+    def tensor_dilate(self, bin_img, ksize=3, erode=False):
+        bin_img = torch.as_tensor(bin_img, dtype=torch.float32)
+        pad = (ksize - 1) // 2
+
         # 首先为原图加入 padding，防止图像尺寸缩小
         B, C, H, W = bin_img.shape
-        pad = (ksize - 1) // 2
-        bin_img = F.pad(bin_img, [pad, pad, pad, pad], mode='constant', value=0)
+        bin_img = F.pad(bin_img, [pad, pad, pad, pad], mode='replicate', value=0)
         # 将原图 unfold 成 patch
         patches = bin_img.unfold(dimension=2, size=ksize, step=1)
         patches = patches.unfold(dimension=3, size=ksize, step=1)
         # B x C x H x W x k x k
         # 取每个 patch 中最小的值，i.e., 0
-        dilate, _ = patches.reshape(B, C, H, W, -1).max(dim=-1)
-        return dilate
+        if erode:
+            # 取每个 patch 中最小的值，i.e., 0
+            res, _ = patches.reshape(B, C, H, W, -1).min(dim=-1)
+        else:
+            # 取每个 patch 中最小的值，i.e., 0
+            res, _ = patches.reshape(B, C, H, W, -1).max(dim=-1)
+
+        return res
+
+    # 截取图像目标框
+    def img_crop(self, img, p1, p2):
+        p1_x, p1_y = p1
+        p2_x, p2_y = p2
+
+        img_crop = img[p1_y:p2_y, p1_x:p2_x]
+        return img_crop
 
     # 保存mosaic增强后的图像
     def save_mosaic_imgs(self, img, masks, labels, index, new_masks=None, new_labels=None):
         # 存储mosaic处理的图片
-        workPath = os.getcwd()
-        dirName = f"save-mosaic/mosaicImgs"
-        dirPath = os.path.join(workPath, dirName)
+        dirName = f"mosaicImgs"
+        dirPath = os.path.join(self.imgRoot, dirName)
         if not os.path.exists(dirPath):
-            os.makedirs(dirPath)
+            try:
+                os.makedirs(dirPath)
+            except:
+                os.mkdir(dirPath)
 
         fileName = os.path.basename(self.im_files[index])
-        oriName = os.path.splitext(fileName)[0] + '_1' + os.path.splitext(fileName)[1]
-        preName = os.path.splitext(fileName)[0] + '_2' + os.path.splitext(fileName)[1]
+        maskName = os.path.splitext(fileName)[0] + '_1' + os.path.splitext(fileName)[1]
+        oriName = os.path.splitext(fileName)[0] + '_2' + os.path.splitext(fileName)[1]
+        newmaskName = os.path.splitext(fileName)[0] + '_3' + os.path.splitext(fileName)[1]
+        preName = os.path.splitext(fileName)[0] + '_4' + os.path.splitext(fileName)[1]
         path_1 = os.path.join(dirPath, f'{fileName}')
         path_2 = os.path.join(dirPath, f'{oriName}')
         path_3 = os.path.join(dirPath, f'{preName}')
+        # 掩盖层存储路径
+        path_mask = os.path.join(dirPath, f'{maskName}')
+        path_newmask = os.path.join(dirPath, f'{newmaskName}')
 
         # 原始标签图像
         ic_1 = img.copy()
@@ -330,6 +391,8 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
 
         try:
             labels_xyxy = xywhn2xyxy(labels[:, 1:], img.shape[0], img.shape[1], 0, 0)
+            # 原始拼接图像
+            cv2.imwrite(path_1, img)
         except IndexError:
             # print(f'\n{"="*25}\n{fileName} is empty!\n{"="*25}\n')
             cv2.imwrite(path_1, img)
@@ -340,8 +403,8 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
         for l in labels_xyxy:
             point_1 = (int(l[0]), int(l[1]))
             point_2 = (int(l[2]), int(l[3]))
-            cv2.rectangle(ic_1, point_1, point_2, (255, 0, 0), 2)
-        # 绘制遮盖层
+            cv2.rectangle(ic_1, point_1, point_2, (255, 0, 0), 1)
+        # 绘制原始遮盖层
         masks_ = masks.type(torch.float32)
         if not self.overlap:
             masks_ = masks.sum(axis=0, keepdim=True)
@@ -356,37 +419,40 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
         output = cv2.addWeighted(ic_1, 1, mask, 0.5, 0)
         # 展示掩码信息的拼接图像
         cv2.imwrite(path_2, output)
-        # 原始拼接图像
-        cv2.imwrite(path_1, img)
+        cv2.imwrite(path_mask, mask)
 
         # 存储与处理后图像
         if self.pre_process:
             try:
                 new_labels_xyxy = xywhn2xyxy(new_labels[:, 1:], img.shape[0], img.shape[1], 0, 0)
             except IndexError:
-                cv2.imwrite(path_3, ic_1)
+                cv2.imwrite(path_3, ic_2)
+                return
 
             for l in new_labels_xyxy:
                 new_point1 = (int(l[0]), int(l[1]))
                 new_point2 = (int(l[2]), int(l[3]))
-                cv2.rectangle(ic_2, new_point1, new_point2, (0, 0, 255), 2)
+                cv2.rectangle(ic_2, new_point1, new_point2, (0, 0, 255), 1)
 
-            # 绘制遮盖层
+            # 绘制预处理后遮盖层
             new_masks_ = new_masks.type(torch.float32)
             if not self.overlap:
-                new_masks_ = masks.sum(axis=0, keepdim=True)
+                new_masks_ = new_masks_.sum(axis=0, keepdim=True)
                 new_masks_ = new_masks_.type(torch.float32)
 
             new_masks_ = F.interpolate(new_masks_[None], ic_2.shape[:2], mode='bilinear', align_corners=False)[0]
-            new_masks_[new_masks_ > 1] = 1
+            new_masks_[new_masks_ >= 1] = 1
             new_masks_ = new_masks_.permute((1, 2, 0)) * 255
-            c1 = torch.zeros(new_masks_.shape, dtype=mask_.dtype)
-            c2 = torch.zeros(new_masks_.shape, dtype=mask_.dtype)
+
+            c1 = torch.zeros(new_masks_.shape, dtype=new_masks_.dtype)
+            c2 = torch.zeros(new_masks_.shape, dtype=new_masks_.dtype)
             new_mask = torch.cat((c1, c2, new_masks_), dim=2).cpu().numpy()
             new_mask = new_mask.astype(np.uint8)
             new_output = cv2.addWeighted(ic_2, 1, new_mask, 0.5, 0)
 
+            # 绘制预处理后图像
             cv2.imwrite(path_3, new_output)
+            cv2.imwrite(path_newmask, new_mask)
 
     def load_mosaic(self, index):
         fileName = os.path.basename(self.im_files[index])
@@ -400,7 +466,7 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
         indices = [index] + random.choices(self.indices, k=3)  # 3 additional image indices
 
         # 创建文件记录mosaic处理文件
-        logTxt = f'./save-mosaic/mosaicLog.txt'
+        logTxt = os.path.join(self.imgRoot, 'mosaicLog.txt')
         content = f'{fileName.ljust(15, " ")}: '
 
         for i, index in enumerate(indices):
