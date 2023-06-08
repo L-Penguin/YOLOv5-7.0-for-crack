@@ -137,10 +137,9 @@ def k_means(boxes, k, dist=np.median, use_iou=True, use_pp=False):
     box_number = boxes.shape[0]
     last_nearest = np.zeros((box_number,))
     # 在所有的bboxes中随机挑选k个作为簇的中心
-    if not use_pp:
+    if not use_pp:  # k_means计算初始值
         clusters = boxes[np.random.choice(box_number, k, replace=False)]
-    # k_means++计算初始值
-    else:
+    else:   # k_means++计算初始值
         clusters = calc_center(boxes, k, iou=use_iou)
 
     print(f'\ninital clusters: {clusters}\n')
