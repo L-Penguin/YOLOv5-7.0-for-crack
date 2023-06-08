@@ -461,7 +461,7 @@ class LoadImagesAndLabels(Dataset):
                  device='0',
                  pre_process=False,
                  saveMosaicImg=False,
-                 cls_name='yolov5s-cls',):
+                 cls_name='efficientnet_b0',):
         self.img_size = img_size
         self.augment = augment
         self.hyp = hyp
@@ -490,7 +490,7 @@ class LoadImagesAndLabels(Dataset):
             if not os.path.exists(self.imgRoot) and self.saveMosaicImg:
                 os.mkdir(self.imgRoot)
 
-            self.img_cls = image_classify(weights=weights, device=device)
+            self.img_cls = image_classify(weights=weights, device='cpu')
 
         try:
             f = []  # image files

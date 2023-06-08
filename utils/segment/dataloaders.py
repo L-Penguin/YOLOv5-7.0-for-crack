@@ -129,7 +129,7 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
 
         self.imgRoot = f'save-mosaic'
         if self.pre_process:
-            weights = f'../classify/train-cls/efficientnet_b0/weights/best.pt'
+            weights = f'../classify/train-cls/efficientnet_b0-efficientnet_b0/weights/best.pt'
             if not os.path.exists(weights):
                 raise FileNotFoundError(f'ERROR: {os.path.abspath(weights)} is not found')
 
@@ -315,7 +315,7 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
                     self.tensor_dilate(
                         masks[index][None, None],
                         self.dilate),
-                    self.dilate-2,
+                    self.dilate,
                     True)
             )
 
@@ -403,7 +403,7 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
         for l in labels_xyxy:
             point_1 = (int(l[0]), int(l[1]))
             point_2 = (int(l[2]), int(l[3]))
-            cv2.rectangle(ic_1, point_1, point_2, (255, 0, 0), 1)
+            cv2.rectangle(ic_1, point_1, point_2, (255, 0, 0), 2)
         # 绘制原始遮盖层
         masks_ = masks.type(torch.float32)
         if not self.overlap:
@@ -432,7 +432,7 @@ class LoadImagesAndLabelsAndMasks(LoadImagesAndLabels):  # for training/testing
             for l in new_labels_xyxy:
                 new_point1 = (int(l[0]), int(l[1]))
                 new_point2 = (int(l[2]), int(l[3]))
-                cv2.rectangle(ic_2, new_point1, new_point2, (0, 0, 255), 1)
+                cv2.rectangle(ic_2, new_point1, new_point2, (0, 0, 255), 2)
 
             # 绘制预处理后遮盖层
             new_masks_ = new_masks.type(torch.float32)
