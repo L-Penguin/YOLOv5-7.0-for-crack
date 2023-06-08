@@ -53,7 +53,7 @@ obj-detection/save-mosaic*
 dataSets
 classify/train-cls/*
 
-works/*
+works
 
 log-train
 
