@@ -1,6 +1,7 @@
 train: ../dataSets/crackSet-seg/path_txts/train.txt
 val: ../dataSets/crackSet-seg/path_txts/val.txt
 test: ../dataSets/crackSet-seg/path_txts/test.txt
+# test: ../dataSets/crackSet-seg/path_txts/test_highCrack.txt
 
 # number of classes
 nc: 1
