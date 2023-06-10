@@ -39,12 +39,12 @@ segment/predict-seg/*
 segment/mosaicImgs*+/*
 classify/train-cls
 classify/imgs-predict-cls
-segment/cfgs/*
+#segment/cfgs/*
 segment/cfgs_ago/*
 segment/train-seg
 segment/imgs-predict-seg
 segment/save-mosaic*
-obj-detection/cfgs
+#obj-detection/cfgs
 obj-detection/train-obj
 obj-detection/predict-obj
 obj-detection/imgs-predict-obj
