@@ -37,7 +37,6 @@ data/images/*
 segment/train-seg/*
 segment/predict-seg/*
 segment/mosaicImgs*+/*
-hyps
 classify/train-cls
 classify/imgs-predict-cls
 segment/cfgs/*
